@@ -293,6 +293,8 @@ class GlutenConfig(conf: SQLConf) extends Logging {
 }
 
 object GlutenConfig {
+  var GLUTEN_ENABLE_BY_DEFAULT = true
+  val GLUTEN_ENABLE_KEY = "spark.gluten.enabled"
 
   val GLUTEN_LIB_NAME = "spark.gluten.sql.columnar.libname"
   val GLUTEN_LIB_PATH = "spark.gluten.sql.columnar.libpath"
@@ -397,7 +399,7 @@ object GlutenConfig {
       })
 
     val keyWithDefault = ImmutableList.of(
-      (SQLConf.ARROW_EXECUTION_MAX_RECORDS_PER_BATCH.key, "32768"),
+      (SQLConf.ARROW_EXECUTION_MAX_RECORDS_PER_BATCH.key, "4096"),
       (SQLConf.CASE_SENSITIVE.key, "false")
     )
     keyWithDefault.forEach(e => nativeConfMap.put(e._1, conf.getConfString(e._1, e._2)))
@@ -422,7 +424,8 @@ object GlutenConfig {
       SPARK_HIVE_EXEC_ORC_ROW_INDEX_STRIDE,
       SPARK_HIVE_EXEC_ORC_COMPRESS,
       // DWRF datasource config end
-      GLUTEN_OFFHEAP_SIZE_IN_BYTES_KEY
+      GLUTEN_OFFHEAP_SIZE_IN_BYTES_KEY,
+      GLUTEN_TASK_OFFHEAP_SIZE_IN_BYTES_KEY
     )
     keys.forEach(
       k => {

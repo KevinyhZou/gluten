@@ -243,7 +243,7 @@ sudo apt install -y libiberty-dev libxml2-dev libkrb5-dev libgsasl7-dev libuuid1
 ## 2.5 AWS S3 support
 
 Velox supports S3 with the open source [AWS C++ SDK](https://github.com/aws/aws-sdk-cpp) and Gluten uses Velox S3 connector to connect with S3.
-A new build option for S3(velox_enable_s3) is added. Below command is used to enable this feature
+A new build option for S3(enable_s3) is added. Below command is used to enable this feature
 ```
 cd /path_to_gluten/ep/build-velox/src/
 ./get_velox.sh --enable_s3=ON
@@ -252,7 +252,7 @@ cd /path_to_gluten/ep/build-velox/src/
 cd /path_to_gluten/cpp
 mkdir build
 cd build
-cmake -DBUILD_VELOX_BACKEND=ON -DVELOX_ENABLE_S3=ON ..
+cmake -DBUILD_VELOX_BACKEND=ON -DENABLE_S3=ON ..
 make -j
 
 cd /path_to_gluten
@@ -340,16 +340,22 @@ Velox backend supports spill-to-disk by default.
 
 Using the following configuration options to customize spilling:
 
-| Name                                                                     | Default Value | Description                                                                                                                                     |
-|--------------------------------------------------------------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| spark.gluten.sql.columnar.backend.velox.spillEnabled                     | true          | Whether spill is enabled on Velox backend                                                                                                       |
-| spark.gluten.sql.columnar.backend.velox.memoryCapRatio                   | 0.75          | The overall ratio of total off-heap memory Velox is able to allocate from. If this value is set lower, spill will be triggered more frequently. |
-| spark.gluten.sql.columnar.backend.velox.kAggregationSpillEnabled         | true          | Whether spill is enabled on aggregations                                                                                                        |
-| spark.gluten.sql.columnar.backend.velox.kJoinSpillEnabled                | true          | Whether spill is enabled on joins                                                                                                               |
-| spark.gluten.sql.columnar.backend.velox.kOrderBySpillEnabled             | true          | Whether spill is enabled on sorts                                                                                                               |
-| spark.gluten.sql.columnar.backend.velox.kAggregationSpillMemoryThreshold | 0 (auto)      | Memory limit before spilling to disk for aggregations, per Spark task. Unit: byte                                                               |
-| spark.gluten.sql.columnar.backend.velox.kJoinSpillMemoryThreshold        | 0             | Memory limit before spilling to disk for joins, per Spark task. Unit: byte                                                                      |
-| spark.gluten.sql.columnar.backend.velox.kOrderBySpillMemoryThreshold     | 0             | Memory limit before spilling to disk for sorts, per Spark task. Unit: byte                                                                      |
+| Name                                                                    | Default Value | Description                                                                                                                                     |
+|-------------------------------------------------------------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| spark.gluten.sql.columnar.backend.velox.spillEnabled                    | true          | Whether spill is enabled on Velox backend                                                                                                       |
+| spark.gluten.sql.columnar.backend.velox.memoryCapRatio                  | 0.75          | The overall ratio of total off-heap memory Velox is able to allocate from. If this value is set lower, spill will be triggered more frequently. |
+| spark.gluten.sql.columnar.backend.velox.aggregationSpillEnabled         | true          | Whether spill is enabled on aggregations                                                                                                        |
+| spark.gluten.sql.columnar.backend.velox.joinSpillEnabled                | true          | Whether spill is enabled on joins                                                                                                               |
+| spark.gluten.sql.columnar.backend.velox.orderBySpillEnabled             | true          | Whether spill is enabled on sorts                                                                                                               |
+| spark.gluten.sql.columnar.backend.velox.aggregationSpillMemoryThreshold | 0 (auto)      | Memory limit before spilling to disk for aggregations, per Spark task. Unit: byte                                                               |
+| spark.gluten.sql.columnar.backend.velox.joinSpillMemoryThreshold        | 0             | Memory limit before spilling to disk for joins, per Spark task. Unit: byte                                                                      |
+| spark.gluten.sql.columnar.backend.velox.orderBySpillMemoryThreshold     | 0             | Memory limit before spilling to disk for sorts, per Spark task. Unit: byte                                                                      |
+| spark.gluten.sql.columnar.backend.velox.maxSpillLevel                   | 4             | The max allowed spilling level with zero being the initial spilling level                                                                       |
+| spark.gluten.sql.columnar.backend.velox.maxSpillFileSize                | 0             | The max allowed spill file size. If it is zero, then there is no limit                                                                          |
+| spark.gluten.sql.columnar.backend.velox.minSpillRunSize                 | 268435456     | The min spill run size limit used to select partitions for spilling                                                                             |
+| spark.gluten.sql.columnar.backend.velox.spillStartPartitionBit          | 29            | The start partition bit which is used with 'spillPartitionBits' together to calculate the spilling partition number                             |
+| spark.gluten.sql.columnar.backend.velox.spillPartitionBits              | 2             | The number of bits used to calculate the spilling partition number. The number of spilling partitions will be power of two                      |
+| spark.gluten.sql.columnar.backend.velox.spillableReservationGrowthPct   | 25            | The spillable memory reservation growth percentage of the previous memory reservation size                                                      |
 
 # 6 Intel® QuickAssist Technology (QAT) support
 

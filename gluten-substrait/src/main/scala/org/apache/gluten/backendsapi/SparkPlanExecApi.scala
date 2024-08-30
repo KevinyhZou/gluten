@@ -64,8 +64,10 @@ trait SparkPlanExecApi {
    */
   def genFilterExecTransformer(condition: Expression, child: SparkPlan): FilterExecTransformerBase
 
-  def genHiveTableScanExecTransformer(plan: SparkPlan): HiveTableScanExecTransformer =
-    HiveTableScanExecTransformer(plan)
+  def genHiveTableScanExecTransformer(
+      plan: SparkPlan,
+      projectAttrs: Seq[Attribute] = Seq.empty): HiveTableScanExecTransformer =
+    HiveTableScanExecTransformer(plan, projectAttrs)
 
   def genProjectExecTransformer(
       projectList: Seq[NamedExpression],
@@ -690,4 +692,6 @@ trait SparkPlanExecApi {
       limitExpr: ExpressionTransformer,
       original: StringSplit): ExpressionTransformer =
     GenericExpressionTransformer(substraitExprName, Seq(srcExpr, regexExpr, limitExpr), original)
+
+  def supportHiveTableScanNestedColumnPruning(): Boolean = false
 }

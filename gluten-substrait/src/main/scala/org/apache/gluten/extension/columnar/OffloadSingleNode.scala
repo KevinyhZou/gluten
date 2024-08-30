@@ -105,8 +105,8 @@ case class OffloadExchange() extends OffloadSingleNode with LogLevelUtil {
     case p if FallbackTags.nonEmpty(p) =>
       p
     case s: ShuffleExchangeExec
-        if (s.child.supportsColumnar || GlutenConfig.getConf.enablePreferColumnar) &&
-          BackendsApiManager.getSettings.supportColumnarShuffleExec() =>
+      if (s.child.supportsColumnar || GlutenConfig.getConf.enablePreferColumnar) &&
+        BackendsApiManager.getSettings.supportColumnarShuffleExec() =>
       logDebug(s"Columnar Processing for ${s.getClass} is currently supported.")
       BackendsApiManager.getSparkPlanExecApiInstance.genColumnarShuffleExchange(s)
     case b: BroadcastExchangeExec =>

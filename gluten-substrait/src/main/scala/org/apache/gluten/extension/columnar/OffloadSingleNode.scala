@@ -37,7 +37,7 @@ import org.apache.spark.sql.execution.exchange.{BroadcastExchangeExec, ShuffleEx
 import org.apache.spark.sql.execution.joins._
 import org.apache.spark.sql.execution.python.{ArrowEvalPythonExec, BatchEvalPythonExec}
 import org.apache.spark.sql.execution.window.{WindowExec, WindowGroupLimitExecShim}
-import org.apache.spark.sql.hive.HiveTableScanExecTransformer
+import org.apache.spark.sql.hive.{HiveTableScanExecTransformer, HiveTableScanNestedColumnPruning}
 
 /**
  * Converts a vanilla Spark plan node into Gluten plan node. Gluten plan is supposed to be executed
@@ -275,7 +275,11 @@ object OffloadOthers {
         case plan: ProjectExec =>
           val columnarChild = plan.child
           logDebug(s"Columnar Processing for ${plan.getClass} is currently supported.")
-          ProjectExecTransformer(plan.projectList, columnarChild)
+          if (HiveTableScanNestedColumnPruning.supportNestedColumnPruning(plan)) {
+            HiveTableScanNestedColumnPruning.apply(plan)
+          } else {
+            ProjectExecTransformer(plan.projectList, columnarChild)
+          }
         case plan: SortAggregateExec =>
           logDebug(s"Columnar Processing for ${plan.getClass} is currently supported.")
           HashAggregateExecBaseTransformer.from(plan)
@@ -415,6 +419,7 @@ object OffloadOthers {
         ScanTransformerFactory.createBatchScanTransformer(plan)
       case plan if HiveTableScanExecTransformer.isHiveTableScan(plan) =>
         // TODO: Add DynamicPartitionPruningHiveScanSuite.scala
+        logInfo("Hive table scan exec transformer....")
         val hiveTableScanExecTransformer =
           BackendsApiManager.getSparkPlanExecApiInstance.genHiveTableScanExecTransformer(plan)
         val validateResult = hiveTableScanExecTransformer.doValidate()

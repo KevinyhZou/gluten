@@ -23,7 +23,6 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, Expression, GetArrayItem, GetMapValue, GetStructField, NamedExpression}
 import org.apache.spark.sql.execution.{ProjectExec, SparkPlan}
 import org.apache.spark.sql.hive.HiveTableScanExecTransformer.TEXT_INPUT_FORMAT_CLASS
-import org.apache.spark.sql.hive.execution.HiveTableScanExec
 import org.apache.spark.sql.types._
 import org.apache.spark.util.Utils
 
@@ -32,7 +31,7 @@ object HiveTableScanNestedColumnPruning extends Logging {
   def supportNestedColumnPruning(projectExec: ProjectExec): Boolean = {
     if (BackendsApiManager.getSparkPlanExecApiInstance.supportHiveTableScanNestedColumnPruning()) {
       projectExec.child match {
-        case HiveTableScanExec(_, relation, _) =>
+        case HiveTableScanExecTransformer(_, relation, _, _) =>
           // Only support for hive json format. ORC, Parquet is already supported by `FileSourceScanExec` and hive text format will fallback to valina to execute for nested field right now.
           relation.tableMeta.storage.inputFormat match {
             case Some(inputFormat)
@@ -175,7 +174,7 @@ object HiveTableScanNestedColumnPruning extends Logging {
           val rootAttr = convertExpression(child, outputs, getRoot = true)
           val newChild = convertExpression(child, Seq.apply(rootAttr.asInstanceOf[Attribute]))
           val newAlias = alias.withNewChildren(Seq.apply(newChild)).asInstanceOf[Alias]
-          logInfo("The new generated project expression:" + newAlias.toJSON)
+          logDebug("The new generated project expression:" + newAlias.toJSON)
           newProjectList :+= newAlias
         case _ =>
           newProjectList :+= expr

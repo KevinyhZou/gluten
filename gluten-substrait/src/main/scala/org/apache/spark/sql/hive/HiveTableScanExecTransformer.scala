@@ -223,17 +223,21 @@ object HiveTableScanExecTransformer {
       projectAttrs: Seq[Attribute] = Seq.empty): HiveTableScanExecTransformer = {
     plan match {
       case hiveTableScanTrans: HiveTableScanExecTransformer =>
-        hiveTableScanTrans
-      case hiveTableScan: HiveTableScanExec =>
-        var projectOutputAttrs = hiveTableScan.requestedAttributes
+        var projectOutputAttrs = hiveTableScanTrans.requestedAttributes
         if (projectAttrs.nonEmpty) {
           projectOutputAttrs = projectAttrs
         }
         new HiveTableScanExecTransformer(
+          hiveTableScanTrans.requestedAttributes,
+          hiveTableScanTrans.relation,
+          hiveTableScanTrans.partitionPruningPred,
+          projectOutputAttrs)(hiveTableScanTrans.session)
+      case hiveTableScan: HiveTableScanExec =>
+        new HiveTableScanExecTransformer(
           hiveTableScan.requestedAttributes,
           hiveTableScan.relation,
           hiveTableScan.partitionPruningPred,
-          projectOutputAttrs)(hiveTableScan.session)
+          Seq.empty[Attribute])(hiveTableScan.session)
       case _ =>
         throw new UnsupportedOperationException(
           s"Can't transform HiveTableScanExecTransformer from ${plan.getClass.getSimpleName}")

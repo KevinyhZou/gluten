@@ -24,7 +24,7 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeRef
 import org.apache.spark.sql.execution.{ProjectExec, SparkPlan}
 import org.apache.spark.sql.hive.HiveTableScanExecTransformer.TEXT_INPUT_FORMAT_CLASS
 import org.apache.spark.sql.hive.execution.HiveTableScanExec
-import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructField, StructType}
+import org.apache.spark.sql.types._
 import org.apache.spark.util.Utils
 
 object HiveTableScanNestedColumnPruning extends Logging {

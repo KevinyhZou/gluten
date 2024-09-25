@@ -46,7 +46,7 @@ case class HiveTableScanExecTransformer(
     requestedAttributes: Seq[Attribute],
     relation: HiveTableRelation,
     partitionPruningPred: Seq[Expression],
-    projectOutputs: Seq[Attribute])(@transient session: SparkSession)
+    prunedOutput: Seq[Attribute] = Seq.empty[Attribute])(@transient session: SparkSession)
   extends AbstractHiveTableScanExec(requestedAttributes, relation, partitionPruningPred)(session)
   with BasicScanExecTransformer {
 
@@ -65,8 +65,8 @@ case class HiveTableScanExecTransformer(
   override def getMetadataColumns(): Seq[AttributeReference] = Seq.empty
 
   override def outputAttributes(): Seq[Attribute] = {
-    if (projectOutputs.nonEmpty) {
-      projectOutputs
+    if (prunedOutput.nonEmpty) {
+      prunedOutput
     } else {
       output
     }
@@ -179,8 +179,7 @@ case class HiveTableScanExecTransformer(
     HiveTableScanExecTransformer(
       requestedAttributes.map(QueryPlan.normalizeExpressions(_, input)),
       relation.canonicalized.asInstanceOf[HiveTableRelation],
-      QueryPlan.normalizePredicates(partitionPruningPred, input),
-      Seq.empty
+      QueryPlan.normalizePredicates(partitionPruningPred, input)
     )(sparkSession)
   }
 }
@@ -211,33 +210,19 @@ object HiveTableScanExecTransformer {
         val hiveTableScanTransformer = new HiveTableScanExecTransformer(
           hiveTableScan.requestedAttributes,
           hiveTableScan.relation,
-          hiveTableScan.partitionPruningPred,
-          Seq.empty)(hiveTableScan.session)
+          hiveTableScan.partitionPruningPred)(hiveTableScan.session)
         hiveTableScanTransformer.doValidate()
       case _ => ValidationResult.failed("Is not a Hive scan")
     }
   }
 
-  def apply(
-      plan: SparkPlan,
-      projectAttrs: Seq[Attribute] = Seq.empty): HiveTableScanExecTransformer = {
+  def apply(plan: SparkPlan): HiveTableScanExecTransformer = {
     plan match {
-      case hiveTableScanTrans: HiveTableScanExecTransformer =>
-        var projectOutputAttrs = hiveTableScanTrans.requestedAttributes
-        if (projectAttrs.nonEmpty) {
-          projectOutputAttrs = projectAttrs
-        }
-        new HiveTableScanExecTransformer(
-          hiveTableScanTrans.requestedAttributes,
-          hiveTableScanTrans.relation,
-          hiveTableScanTrans.partitionPruningPred,
-          projectOutputAttrs)(hiveTableScanTrans.session)
       case hiveTableScan: HiveTableScanExec =>
         new HiveTableScanExecTransformer(
           hiveTableScan.requestedAttributes,
           hiveTableScan.relation,
-          hiveTableScan.partitionPruningPred,
-          Seq.empty[Attribute])(hiveTableScan.session)
+          hiveTableScan.partitionPruningPred)(hiveTableScan.session)
       case _ =>
         throw new UnsupportedOperationException(
           s"Can't transform HiveTableScanExecTransformer from ${plan.getClass.getSimpleName}")

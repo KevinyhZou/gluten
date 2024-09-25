@@ -64,10 +64,8 @@ trait SparkPlanExecApi {
    */
   def genFilterExecTransformer(condition: Expression, child: SparkPlan): FilterExecTransformerBase
 
-  def genHiveTableScanExecTransformer(
-      plan: SparkPlan,
-      projectAttrs: Seq[Attribute] = Seq.empty): HiveTableScanExecTransformer =
-    HiveTableScanExecTransformer(plan, projectAttrs)
+  def genHiveTableScanExecTransformer(plan: SparkPlan): HiveTableScanExecTransformer =
+    HiveTableScanExecTransformer(plan)
 
   def genProjectExecTransformer(
       projectList: Seq[NamedExpression],

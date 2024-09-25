@@ -419,7 +419,6 @@ object OffloadOthers {
         ScanTransformerFactory.createBatchScanTransformer(plan)
       case plan if HiveTableScanExecTransformer.isHiveTableScan(plan) =>
         // TODO: Add DynamicPartitionPruningHiveScanSuite.scala
-        logInfo("Hive table scan exec transformer....")
         val hiveTableScanExecTransformer =
           BackendsApiManager.getSparkPlanExecApiInstance.genHiveTableScanExecTransformer(plan)
         val validateResult = hiveTableScanExecTransformer.doValidate()

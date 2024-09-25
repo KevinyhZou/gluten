@@ -17,22 +17,23 @@
 package org.apache.spark.sql.hive
 
 import org.apache.gluten.backendsapi.BackendsApiManager
-import org.apache.gluten.execution.ProjectExecTransformer
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, Expression, GetArrayItem, GetMapValue, GetStructField, NamedExpression}
-import org.apache.spark.sql.execution.{ProjectExec, SparkPlan}
+import org.apache.spark.sql.catalyst.catalog.HiveTableRelation
+import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.execution.{FilterExec, LeafExecNode, ProjectExec, SparkPlan}
 import org.apache.spark.sql.hive.HiveTableScanExecTransformer.TEXT_INPUT_FORMAT_CLASS
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType}
+import org.apache.spark.sql.util.SchemaUtils._
 import org.apache.spark.util.Utils
 
 object HiveTableScanNestedColumnPruning extends Logging {
+  import org.apache.spark.sql.catalyst.expressions.SchemaPruning._
 
   def supportNestedColumnPruning(projectExec: ProjectExec): Boolean = {
     if (BackendsApiManager.getSparkPlanExecApiInstance.supportHiveTableScanNestedColumnPruning()) {
       projectExec.child match {
         case HiveTableScanExecTransformer(_, relation, _, _) =>
-          // Only support for hive json format. ORC, Parquet is already supported by `FileSourceScanExec` and hive text format will fallback to valina to execute for nested field right now.
           relation.tableMeta.storage.inputFormat match {
             case Some(inputFormat)
                 if TEXT_INPUT_FORMAT_CLASS.isAssignableFrom(Utils.classForName(inputFormat)) =>
@@ -50,233 +51,179 @@ object HiveTableScanNestedColumnPruning extends Logging {
     false
   }
 
-  def apply(projectExec: ProjectExec): SparkPlan = {
-    val projectPlan = projectExec.child
-    val newOutputAttrs = HiveTableScanNestedColumnPruning.genNewScanOutputs(
-      projectPlan.output,
-      projectExec.projectList)
-    val newProjectLists = HiveTableScanNestedColumnPruning
-      .genNewProjectExpressions(projectExec.projectList, newOutputAttrs)
-    val newProjectPlan = HiveTableScanExecTransformer.apply(projectPlan, newOutputAttrs)
-    ProjectExecTransformer(newProjectLists, newProjectPlan)
-  }
-
-  private def fieldExists(
-      fieldName: String,
-      fieldType: DataType,
-      subFieldName: String,
-      subFieldType: DataType,
-      e: Expression): Boolean = {
-    e match {
-      case gf: GetStructField =>
-        if (
-          subFieldName != null && (!gf.extractFieldName.equals(subFieldName) || !gf.dataType.equals(
-            subFieldType))
-        ) {
-          false
-        } else {
-          fieldExists(fieldName, fieldType, null, null, gf.child)
-        }
-      case GetArrayItem(c, _, _) =>
-        fieldExists(fieldName, fieldType, subFieldName, subFieldType, c)
-      case GetMapValue(c, _, _) =>
-        fieldExists(fieldName, fieldType, subFieldName, subFieldType, c)
-      case attr: Attribute =>
-        if (fieldType != null) {
-          attr.name.equals(fieldName) && attr.dataType.equals(fieldType)
-        } else {
-          attr.name.equals(fieldName)
+  def apply(plan: SparkPlan): SparkPlan = {
+    plan match {
+      case ProjectExec(projectList, child) =>
+        child match {
+          case h: HiveTableScanExecTransformer =>
+            val newPlan = prunePhysicalColumns(
+              h.relation,
+              projectList,
+              Seq.empty[Expression],
+              (prunedDataSchema, prunedMetadataSchema) => {
+                buildNewHiveTableScan(h, prunedDataSchema, prunedMetadataSchema)
+              }
+            )
+            if (newPlan.nonEmpty) {
+              return newPlan.get
+            }
+          case _ =>
         }
       case _ =>
-        false
+    }
+    plan
+  }
+
+  private def prunePhysicalColumns(
+      relation: HiveTableRelation,
+      projects: Seq[NamedExpression],
+      filters: Seq[Expression],
+      leafNodeBuilder: (StructType, StructType) => LeafExecNode): Option[SparkPlan] = {
+    val (normalizedProjects, normalizedFilters) =
+      normalizeAttributeRefNames(relation.output, projects, filters)
+    val requestedRootFields = identifyRootFields(normalizedProjects, normalizedFilters)
+    // If requestedRootFields includes a nested field, continue. Otherwise,
+    // return op
+    if (requestedRootFields.exists { root: RootField => !root.derivedFromAtt }) {
+      val prunedDataSchema = pruneSchema(relation.tableMeta.dataSchema, requestedRootFields)
+      val metaFieldNames = relation.tableMeta.schema.fieldNames
+      val metadataSchema = relation.output.collect {
+        case attr: AttributeReference if metaFieldNames.contains(attr.name) => attr
+      }.toStructType
+      val prunedMetadataSchema = if (metadataSchema.nonEmpty) {
+        pruneSchema(metadataSchema, requestedRootFields)
+      } else {
+        metadataSchema
+      }
+      // If the data schema is different from the pruned data schema
+      // OR
+      // the metadata schema is different from the pruned metadata schema, continue.
+      // Otherwise, return None.
+      if (
+        countLeaves(relation.tableMeta.dataSchema) > countLeaves(prunedDataSchema) ||
+        countLeaves(metadataSchema) > countLeaves(prunedMetadataSchema)
+      ) {
+        val leafNode = leafNodeBuilder(prunedDataSchema, prunedMetadataSchema)
+        val projectionOverSchema = ProjectionOverSchema(
+          prunedDataSchema.merge(prunedMetadataSchema),
+          AttributeSet(relation.output))
+        Some(
+          buildNewProjection(
+            projects,
+            normalizedProjects,
+            normalizedFilters,
+            leafNode,
+            projectionOverSchema))
+      } else {
+        None
+      }
+    } else {
+      None
     }
   }
 
-  private def genNewProjectExpressions(
-      projectList: Seq[NamedExpression],
-      outputs: Seq[Attribute]): Seq[NamedExpression] = {
-
-    def getOrdinal(d: DataType, fieldName: String): Int = {
-      d match {
-        case st: StructType =>
-          for (i <- st.indices) {
-            if (st(i).name.equals(fieldName)) {
-              return i
-            } else {
-              val ordinal = getOrdinal(st(i).dataType, fieldName)
-              if (ordinal >= 0) {
-                return ordinal
-              }
-            }
-          }
-        case at: ArrayType =>
-          return getOrdinal(at.elementType, fieldName)
-        case mt: MapType =>
-          return getOrdinal(mt.valueType, fieldName)
-        case _ =>
-      }
-      -1
-    }
-
-    def convertExpression(
-        e: Expression,
-        outputs: Seq[Attribute],
-        getRoot: Boolean = false): Expression = {
-      e match {
-        case ga @ GetArrayItem(c, _, _) =>
-          val newChild = convertExpression(c, outputs, getRoot)
-          if (getRoot) {
-            return newChild
-          } else {
-            return GetArrayItem(newChild, ga.ordinal, ga.failOnError)
-          }
-        case gm @ GetMapValue(c, _, _) =>
-          val newChild = convertExpression(c, outputs, getRoot)
-          if (getRoot) {
-            return newChild
-          } else {
-            return GetMapValue(newChild, gm.key, gm.failOnError)
-          }
-        case gs @ GetStructField(c, _, _) =>
-          val newChild = convertExpression(c, outputs, getRoot)
-          if (getRoot) {
-            return newChild;
-          } else {
-            val rootAttr = outputs.head
-            rootAttr match {
-              case a: Attribute =>
-                val ordinal = getOrdinal(a.dataType, gs.extractFieldName)
-                if (ordinal >= 0)
-                  return GetStructField(newChild, ordinal, gs.name)
-                else
-                  return GetStructField(newChild, gs.ordinal, gs.name)
-              case _ =>
-                return GetStructField(newChild, gs.ordinal, gs.name)
-            }
-          }
-        case attr: Attribute =>
-          for (o <- outputs) {
-            if (
-              fieldExists(attr.name, fieldType = null, subFieldName = null, subFieldType = null, o)
-            ) {
-              val newAttr = attr.withDataType(o.dataType)
-              return newAttr
-            }
-          }
-      }
-      e
-    }
-
-    var newProjectList = Seq.empty[NamedExpression]
-    for (expr <- projectList) {
-      expr match {
-        case alias @ Alias(child, _) =>
-          val rootAttr = convertExpression(child, outputs, getRoot = true)
-          val newChild = convertExpression(child, Seq.apply(rootAttr.asInstanceOf[Attribute]))
-          val newAlias = alias.withNewChildren(Seq.apply(newChild)).asInstanceOf[Alias]
-          logDebug("The new generated project expression:" + newAlias.toJSON)
-          newProjectList :+= newAlias
-        case _ =>
-          newProjectList :+= expr
-      }
-    }
-    newProjectList
+  /**
+   * Normalizes the names of the attribute references in the given projects and filters to reflect
+   * the names in the given logical relation. This makes it possible to compare attributes and
+   * fields by name. Returns a tuple with the normalized projects and filters, respectively.
+   */
+  private def normalizeAttributeRefNames(
+      output: Seq[AttributeReference],
+      projects: Seq[NamedExpression],
+      filters: Seq[Expression]): (Seq[NamedExpression], Seq[Expression]) = {
+    val normalizedAttNameMap = output.map(att => (att.exprId, att.name)).toMap
+    val normalizedProjects = projects
+      .map(_.transform {
+        case att: AttributeReference if normalizedAttNameMap.contains(att.exprId) =>
+          att.withName(normalizedAttNameMap(att.exprId))
+      })
+      .map { case expr: NamedExpression => expr }
+    val normalizedFilters = filters.map(_.transform {
+      case att: AttributeReference if normalizedAttNameMap.contains(att.exprId) =>
+        att.withName(normalizedAttNameMap(att.exprId))
+    })
+    (normalizedProjects, normalizedFilters)
   }
 
-  private def genNewScanOutputs(
-      outputs: Seq[Attribute],
-      projectList: Seq[NamedExpression]): Seq[Attribute] = {
-
-    def projectExists(
-        attrName: String,
-        attrType: DataType,
-        fieldName: String,
-        fieldType: DataType): Boolean = {
-      if (fieldName == null) {
-        return false
-      }
-      var exists = false
-      for (p <- projectList) {
-        if (exists)
-          return true
-        else
-          p match {
-            case Alias(child, _) =>
-              exists = fieldExists(attrName, attrType, fieldName, fieldType, child)
-            case a: Attribute => exists = a.name.equals(fieldName) && a.dataType.equals(fieldType)
-            case _ =>
-          }
-      }
-      exists
-    }
-
-    def genOutputType(
-        fieldName: String,
-        fieldType: DataType,
-        subFieldName: String,
-        subFieldType: DataType): Option[DataType] = {
-      if (subFieldName != null && projectExists(fieldName, fieldType, subFieldName, subFieldType)) {
-        Option.apply(subFieldType)
+  /** Builds the new output [[Project]] Spark SQL operator that has the `leafNode`. */
+  private def buildNewProjection(
+      projects: Seq[NamedExpression],
+      normalizedProjects: Seq[NamedExpression],
+      filters: Seq[Expression],
+      leafNode: LeafExecNode,
+      projectionOverSchema: ProjectionOverSchema): ProjectExec = {
+    // Construct a new target for our projection by rewriting and
+    // including the original filters where available
+    val projectionChild =
+      if (filters.nonEmpty) {
+        val projectedFilters = filters.map(_.transformDown {
+          case projectionOverSchema(expr) => expr
+        })
+        val newFilterCondition = projectedFilters.reduce(And)
+        FilterExec(newFilterCondition, leafNode)
       } else {
-        var dt = subFieldType
-        if (dt == null) {
-          dt = fieldType
-        }
-        dt match {
-          case st: StructType =>
-            var structFields = Seq.empty[StructField]
-            for (i <- st.fields.indices) {
-              val f = st.fields(i)
-              val newFieldType = genOutputType(fieldName, fieldType, f.name, f.dataType)
-              if (newFieldType.nonEmpty) {
-                val structField = StructField(f.name, newFieldType.get)
-                structFields :+= structField
-              }
-            }
-            if (structFields.nonEmpty) {
-              val newStructType = StructType(structFields.toArray)
-              Option.apply(newStructType)
-            } else {
-              Option.empty[StructType]
-            }
-          case a: ArrayType =>
-            val newElementType =
-              genOutputType(fieldName, fieldType, subFieldName = "", a.elementType)
-            var newArrayType = Option.empty[ArrayType]
-            if (newElementType.nonEmpty) {
-              newArrayType = Option.apply(ArrayType(newElementType.get, a.containsNull))
-            }
-            newArrayType
-          case m: MapType =>
-            val newValueType = genOutputType(fieldName, fieldType, subFieldName = "", m.valueType)
-            var newMapType = Option.empty[MapType]
-            if (newValueType.nonEmpty) {
-              newMapType = Option.apply(MapType(m.keyType, newValueType.get, m.valueContainsNull))
-            }
-            newMapType
-          case _ =>
-            Option.empty[DataType]
-        }
+        leafNode
       }
-    }
 
-    var newOutputs = Seq.empty[Attribute]
-    for (outputAttr <- outputs) {
-      val newOutputType = genOutputType(
-        outputAttr.name,
-        outputAttr.dataType,
-        subFieldName = null,
-        subFieldType = null)
-      if (newOutputType.nonEmpty) {
-        val newOutputAttr = AttributeReference(outputAttr.name, newOutputType.get)()
-        logDebug("The new generated output attribute: " + newOutputAttr.toJSON)
-        newOutputs :+= newOutputAttr
-      } else {
-        val originOutputAttr = AttributeReference(outputAttr.name, outputAttr.dataType)()
-        logDebug("Use the original attribute:" + originOutputAttr.toJSON)
-        newOutputs :+= originOutputAttr
+    // Construct the new projections of our Project by
+    // rewriting the original projections
+    val newProjects =
+      normalizedProjects.map(_.transformDown { case projectionOverSchema(expr) => expr }).map {
+        case expr: NamedExpression => expr
       }
+
+    if (log.isDebugEnabled) {
+      logDebug(s"New projects:\n${newProjects.map(_.treeString).mkString("\n")}")
     }
-    newOutputs
+    ProjectExec(restoreOriginalOutputNames(newProjects, projects.map(_.name)), projectionChild)
+  }
+
+  private def buildNewHiveTableScan(
+      hiveTableScan: HiveTableScanExecTransformer,
+      prunedDataSchema: StructType,
+      prunedMetadataSchema: StructType): HiveTableScanExecTransformer = {
+    val relation = hiveTableScan.relation
+    val partitionSchema = relation.tableMeta.partitionSchema
+    val prunedBaseSchema = StructType(
+      prunedDataSchema.fields.filter(
+        f => partitionSchema.fieldNames.contains(f.name, f)) ++ partitionSchema.fields)
+    val finalSchema = prunedBaseSchema.merge(prunedMetadataSchema)
+    val prunedOutput = getPrunedOutput(relation.output, finalSchema)
+    val finalOutput =
+      prunedOutput.filter(p => hiveTableScan.requestedAttributes.exists(x => x.name.equals(p.name)))
+    HiveTableScanExecTransformer(
+      hiveTableScan.requestedAttributes,
+      relation,
+      hiveTableScan.partitionPruningPred,
+      finalOutput)(hiveTableScan.session)
+  }
+
+  // Prune the given output to make it consistent with `requiredSchema`.
+  private def getPrunedOutput(
+      output: Seq[AttributeReference],
+      requiredSchema: StructType): Seq[AttributeReference] = {
+    // We need to update the data type of the output attributes to use the pruned ones.
+    // so that references to the original relation's output are not broken
+    val nameAttributeMap = output.map(att => (att.name, att)).toMap
+    requiredSchema.toAttributes
+      .map {
+        case att if nameAttributeMap.contains(att.name) =>
+          nameAttributeMap(att.name).withDataType(att.dataType)
+        case att => att
+      }
+  }
+
+  /**
+   * Counts the "leaf" fields of the given dataType. Informally, this is the number of fields of
+   * non-complex data type in the tree representation of [[DataType]].
+   */
+  private def countLeaves(dataType: DataType): Int = {
+    dataType match {
+      case array: ArrayType => countLeaves(array.elementType)
+      case map: MapType => countLeaves(map.keyType) + countLeaves(map.valueType)
+      case struct: StructType =>
+        struct.map(field => countLeaves(field.dataType)).sum
+      case _ => 1
+    }
   }
 }

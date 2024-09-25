@@ -62,6 +62,9 @@ object HiveTableScanNestedColumnPruning extends Logging {
               Seq.empty[Expression],
               (prunedDataSchema, prunedMetadataSchema) => {
                 buildNewHiveTableScan(h, prunedDataSchema, prunedMetadataSchema)
+              },
+              (schema, requestFields) => {
+                h.pruneSchema(schema, requestFields)
               }
             )
             if (newPlan.nonEmpty) {
@@ -78,20 +81,22 @@ object HiveTableScanNestedColumnPruning extends Logging {
       relation: HiveTableRelation,
       projects: Seq[NamedExpression],
       filters: Seq[Expression],
-      leafNodeBuilder: (StructType, StructType) => LeafExecNode): Option[SparkPlan] = {
+      leafNodeBuilder: (StructType, StructType) => LeafExecNode,
+      pruneSchemaFunc: (StructType, Seq[SchemaPruning.RootField]) => StructType)
+      : Option[SparkPlan] = {
     val (normalizedProjects, normalizedFilters) =
       normalizeAttributeRefNames(relation.output, projects, filters)
     val requestedRootFields = identifyRootFields(normalizedProjects, normalizedFilters)
     // If requestedRootFields includes a nested field, continue. Otherwise,
     // return op
     if (requestedRootFields.exists { root: RootField => !root.derivedFromAtt }) {
-      val prunedDataSchema = pruneSchema(relation.tableMeta.dataSchema, requestedRootFields)
+      val prunedDataSchema = pruneSchemaFunc(relation.tableMeta.dataSchema, requestedRootFields)
       val metaFieldNames = relation.tableMeta.schema.fieldNames
       val metadataSchema = relation.output.collect {
         case attr: AttributeReference if metaFieldNames.contains(attr.name) => attr
       }.toStructType
       val prunedMetadataSchema = if (metadataSchema.nonEmpty) {
-        pruneSchema(metadataSchema, requestedRootFields)
+        pruneSchemaFunc(metadataSchema, requestedRootFields)
       } else {
         metadataSchema
       }
@@ -201,16 +206,17 @@ object HiveTableScanNestedColumnPruning extends Logging {
   // Prune the given output to make it consistent with `requiredSchema`.
   private def getPrunedOutput(
       output: Seq[AttributeReference],
-      requiredSchema: StructType): Seq[AttributeReference] = {
+      requiredSchema: StructType): Seq[Attribute] = {
     // We need to update the data type of the output attributes to use the pruned ones.
     // so that references to the original relation's output are not broken
     val nameAttributeMap = output.map(att => (att.name, att)).toMap
-    requiredSchema.toAttributes
-      .map {
-        case att if nameAttributeMap.contains(att.name) =>
-          nameAttributeMap(att.name).withDataType(att.dataType)
-        case att => att
-      }
+    val requiredAttributes =
+      requiredSchema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
+    requiredAttributes.map {
+      case att if nameAttributeMap.contains(att.name) =>
+        nameAttributeMap(att.name).withDataType(att.dataType)
+      case att => att
+    }
   }
 
   /**

@@ -17,12 +17,13 @@
 package org.apache.spark.sql.hive
 
 import org.apache.gluten.backendsapi.BackendsApiManager
+import org.apache.gluten.execution.ProjectExecTransformer
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.catalog.HiveTableRelation
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.execution.{FilterExec, LeafExecNode, ProjectExec, SparkPlan}
-import org.apache.spark.sql.hive.HiveTableScanExecTransformer.TEXT_INPUT_FORMAT_CLASS
+import org.apache.spark.sql.hive.HiveTableScanExecTransformer.{ORC_INPUT_FORMAT_CLASS, PARQUET_INPUT_FORMAT_CLASS, TEXT_INPUT_FORMAT_CLASS}
 import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType}
 import org.apache.spark.sql.util.SchemaUtils._
 import org.apache.spark.util.Utils
@@ -43,6 +44,12 @@ object HiveTableScanNestedColumnPruning extends Logging {
                   return true
                 case _ =>
               }
+            case Some(inputFormat)
+                if ORC_INPUT_FORMAT_CLASS.isAssignableFrom(Utils.classForName(inputFormat)) =>
+              return true
+            case Some(inputFormat)
+                if PARQUET_INPUT_FORMAT_CLASS.isAssignableFrom(Utils.classForName(inputFormat)) =>
+              return true
             case _ =>
           }
         case _ =>
@@ -69,8 +76,11 @@ object HiveTableScanNestedColumnPruning extends Logging {
             )
             if (newPlan.nonEmpty) {
               return newPlan.get
+            } else {
+              return ProjectExecTransformer(projectList, child)
             }
           case _ =>
+            return ProjectExecTransformer(projectList, child)
         }
       case _ =>
     }
@@ -156,7 +166,7 @@ object HiveTableScanNestedColumnPruning extends Logging {
       normalizedProjects: Seq[NamedExpression],
       filters: Seq[Expression],
       leafNode: LeafExecNode,
-      projectionOverSchema: ProjectionOverSchema): ProjectExec = {
+      projectionOverSchema: ProjectionOverSchema): ProjectExecTransformer = {
     // Construct a new target for our projection by rewriting and
     // including the original filters where available
     val projectionChild =
@@ -180,7 +190,9 @@ object HiveTableScanNestedColumnPruning extends Logging {
     if (log.isDebugEnabled) {
       logDebug(s"New projects:\n${newProjects.map(_.treeString).mkString("\n")}")
     }
-    ProjectExec(restoreOriginalOutputNames(newProjects, projects.map(_.name)), projectionChild)
+    ProjectExecTransformer(
+      restoreOriginalOutputNames(newProjects, projects.map(_.name)),
+      projectionChild)
   }
 
   private def buildNewHiveTableScan(

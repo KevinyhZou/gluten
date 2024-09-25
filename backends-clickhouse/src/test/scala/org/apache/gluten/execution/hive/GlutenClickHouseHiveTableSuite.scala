@@ -1416,4 +1416,82 @@ class GlutenClickHouseHiveTableSuite
     spark.sql("DROP TABLE test_tbl_7054")
   }
 
+  test("test hive table scan nested column pruning") {
+    val json_table_name = "test_tbl_7267_json"
+    val pq_table_name = "test_tbl_7267_pq"
+    val orc_table_name = "test_tbl_7267_orc"
+    val create_table_sql =
+      s"""
+         | create table %s(
+         | id bigint,
+         | d1 STRUCT<c: STRING, d: ARRAY<STRUCT<x: STRING, y: STRING>>>,
+         | d2 STRUCT<c: STRING, d: Map<STRING, STRUCT<x: STRING, y: STRING>>>
+         | )
+         |""".stripMargin
+    val create_table_1 = create_table_sql.format(json_table_name) +
+      s"""
+         | ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
+         | STORED AS INPUTFORMAT 'org.apache.hadoop.mapred.TextInputFormat'
+         | OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+         |""".stripMargin
+    val create_table_2 = create_table_sql.format(pq_table_name) + " STORED AS PARQUET"
+    val create_table_3 = create_table_sql.format(orc_table_name) + " STORED AS ORC"
+    val insert_sql =
+      """
+        | insert into %s values(1,
+        | named_struct('c', 'c123', 'd', array(named_struct('x', 'x123', 'y', 'y123'))),
+        | named_struct('c', 'c124', 'd', map('m124', named_struct('x', 'x124', 'y', 'y124')))
+        | )
+        |""".stripMargin
+    val insert_sql_1 = insert_sql.format(json_table_name)
+    val insert_sql_2 = insert_sql.format(pq_table_name)
+    val insert_sql_3 = insert_sql.format(orc_table_name)
+    spark.sql(create_table_1)
+    spark.sql(create_table_2)
+    spark.sql(create_table_3)
+    spark.sql(insert_sql_1)
+    spark.sql(insert_sql_2)
+    spark.sql(insert_sql_3)
+    val select_sql_1 = "select d1.c, d1.d[0].x, d2.d['m124'].y from %s".format(json_table_name)
+    val select_sql_2 = "select d1.c, d1.d[0].x, d2.d['m124'].y from %s".format(pq_table_name)
+    val select_sql_3 = "select d1.c, d1.d[0].x, d2.d['m124'].y from %s".format(orc_table_name)
+    withSQLConf(
+      ("spark.sql.hive.convertMetastoreParquet" -> "false"),
+      ("spark.sql.hive.convertMetastoreOrc" -> "false")) {
+      compareResultsAgainstVanillaSpark(
+        select_sql_1,
+        compareResult = true,
+        df => {
+          val jsonFileScan = collect(df.queryExecution.executedPlan) {
+            case l: HiveTableScanExecTransformer => l
+          }
+          assert(jsonFileScan.size == 1)
+        }
+      )
+      compareResultsAgainstVanillaSpark(
+        select_sql_2,
+        compareResult = true,
+        df => {
+          val jsonFileScan = collect(df.queryExecution.executedPlan) {
+            case l: HiveTableScanExecTransformer => l
+          }
+          assert(jsonFileScan.size == 1)
+        }
+      )
+      compareResultsAgainstVanillaSpark(
+        select_sql_3,
+        compareResult = true,
+        df => {
+          val jsonFileScan = collect(df.queryExecution.executedPlan) {
+            case l: HiveTableScanExecTransformer => l
+          }
+          assert(jsonFileScan.size == 1)
+        }
+      )
+      spark.sql("drop table %s".format(json_table_name))
+      spark.sql("drop table %s".format(pq_table_name))
+      spark.sql("drop table %s".format(orc_table_name))
+    }
+  }
+
 }

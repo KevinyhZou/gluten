@@ -1425,8 +1425,10 @@ class GlutenClickHouseHiveTableSuite
          | create table %s(
          | id bigint,
          | d1 STRUCT<c: STRING, d: ARRAY<STRUCT<x: STRING, y: STRING>>>,
-         | d2 STRUCT<c: STRING, d: Map<STRING, STRUCT<x: STRING, y: STRING>>>
-         | )
+         | d2 STRUCT<c: STRING, d: Map<STRING, STRUCT<x: STRING, y: STRING>>>,
+         | day string,
+         | hour string
+         | ) partitioned by(day, hour)
          |""".stripMargin
     val create_table_1 = create_table_sql.format(json_table_name) +
       s"""
@@ -1440,7 +1442,8 @@ class GlutenClickHouseHiveTableSuite
       """
         | insert into %s values(1,
         | named_struct('c', 'c123', 'd', array(named_struct('x', 'x123', 'y', 'y123'))),
-        | named_struct('c', 'c124', 'd', map('m124', named_struct('x', 'x124', 'y', 'y124')))
+        | named_struct('c', 'c124', 'd', map('m124', named_struct('x', 'x124', 'y', 'y124'))),
+        | '2024-09-26', '12'
         | )
         |""".stripMargin
     val insert_sql_1 = insert_sql.format(json_table_name)
@@ -1452,9 +1455,15 @@ class GlutenClickHouseHiveTableSuite
     spark.sql(insert_sql_1)
     spark.sql(insert_sql_2)
     spark.sql(insert_sql_3)
-    val select_sql_1 = "select d1.c, d1.d[0].x, d2.d['m124'].y from %s".format(json_table_name)
-    val select_sql_2 = "select d1.c, d1.d[0].x, d2.d['m124'].y from %s".format(pq_table_name)
-    val select_sql_3 = "select d1.c, d1.d[0].x, d2.d['m124'].y from %s".format(orc_table_name)
+    val select_sql_1 =
+      "select id, d1.c, d1.d[0].x, d2.d['m124'].y from %s where day = '2024-09-26' and hour = '12'"
+        .format(json_table_name)
+    val select_sql_2 =
+      "select id, d1.c, d1.d[0].x, d2.d['m124'].y from %s where day = '2024-09-26' and hour = '12'"
+        .format(pq_table_name)
+    val select_sql_3 =
+      "select id, d1.c, d1.d[0].x, d2.d['m124'].y from %s where day = '2024-09-26' and hour = '12'"
+        .format(orc_table_name)
     withSQLConf(
       ("spark.sql.hive.convertMetastoreParquet" -> "false"),
       ("spark.sql.hive.convertMetastoreOrc" -> "false")) {

@@ -202,12 +202,20 @@ object HiveTableScanNestedColumnPruning extends Logging {
     val relation = hiveTableScan.relation
     val partitionSchema = relation.tableMeta.partitionSchema
     val prunedBaseSchema = StructType(
-      prunedDataSchema.fields.filter(
-        f => partitionSchema.fieldNames.contains(f.name, f)) ++ partitionSchema.fields)
+      prunedDataSchema.fields.filterNot(
+        f => partitionSchema.fieldNames.contains(f.name)) ++ partitionSchema.fields)
     val finalSchema = prunedBaseSchema.merge(prunedMetadataSchema)
     val prunedOutput = getPrunedOutput(relation.output, finalSchema)
-    val finalOutput =
-      prunedOutput.filter(p => hiveTableScan.requestedAttributes.exists(x => x.name.equals(p.name)))
+    var finalOutput = Seq.empty[Attribute]
+    for (p <- hiveTableScan.output) {
+      var flag = false
+      for (q <- prunedOutput if !flag) {
+        if (p.name.equals(q.name)) {
+          finalOutput :+= q
+          flag = true
+        }
+      }
+    }
     HiveTableScanExecTransformer(
       hiveTableScan.requestedAttributes,
       relation,

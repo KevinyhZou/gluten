@@ -1422,7 +1422,7 @@ class GlutenClickHouseHiveTableSuite
     val orc_table_name = "test_tbl_7267_orc"
     val create_table_sql =
       s"""
-         | create table %s(
+         | create table if not exists %s(
          | id bigint,
          | d1 STRUCT<c: STRING, d: ARRAY<STRUCT<x: STRING, y: STRING>>>,
          | d2 STRUCT<c: STRING, d: Map<STRING, STRUCT<x: STRING, y: STRING>>>,
@@ -1497,9 +1497,9 @@ class GlutenClickHouseHiveTableSuite
           assert(jsonFileScan.size == 1)
         }
       )
-      spark.sql("drop table %s".format(json_table_name))
-      spark.sql("drop table %s".format(pq_table_name))
-      spark.sql("drop table %s".format(orc_table_name))
+      spark.sql("drop table if exists %s".format(json_table_name))
+      spark.sql("drop table if exists %s".format(pq_table_name))
+      spark.sql("drop table if exists %s".format(orc_table_name))
     }
   }
 

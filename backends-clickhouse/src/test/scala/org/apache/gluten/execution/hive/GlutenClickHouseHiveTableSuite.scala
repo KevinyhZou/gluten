@@ -1497,10 +1497,10 @@ class GlutenClickHouseHiveTableSuite
           assert(jsonFileScan.size == 1)
         }
       )
-      spark.sql("drop table if exists %s".format(json_table_name))
-      spark.sql("drop table if exists %s".format(pq_table_name))
-      spark.sql("drop table if exists %s".format(orc_table_name))
     }
+    spark.sql("drop table if exists %s".format(json_table_name))
+    spark.sql("drop table if exists %s".format(pq_table_name))
+    spark.sql("drop table if exists %s".format(orc_table_name))
   }
 
 }

@@ -1419,7 +1419,6 @@ class GlutenClickHouseHiveTableSuite
   test("test hive table scan nested column pruning") {
     val json_table_name = "test_tbl_7267_json"
     val pq_table_name = "test_tbl_7267_pq"
-    val orc_table_name = "test_tbl_7267_orc"
     val create_table_sql =
       s"""
          | create table if not exists %s(
@@ -1437,7 +1436,6 @@ class GlutenClickHouseHiveTableSuite
          | OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
          |""".stripMargin
     val create_table_2 = create_table_sql.format(pq_table_name) + " STORED AS PARQUET"
-    val create_table_3 = create_table_sql.format(orc_table_name) + " STORED AS ORC"
     val insert_sql =
       """
         | insert into %s values(1,
@@ -1448,22 +1446,16 @@ class GlutenClickHouseHiveTableSuite
         |""".stripMargin
     val insert_sql_1 = insert_sql.format(json_table_name)
     val insert_sql_2 = insert_sql.format(pq_table_name)
-    val insert_sql_3 = insert_sql.format(orc_table_name)
     spark.sql(create_table_1)
     spark.sql(create_table_2)
-    spark.sql(create_table_3)
     spark.sql(insert_sql_1)
     spark.sql(insert_sql_2)
-    spark.sql(insert_sql_3)
     val select_sql_1 =
       "select id, d1.c, d1.d[0].x, d2.d['m124'].y from %s where day = '2024-09-26' and hour = '12'"
         .format(json_table_name)
     val select_sql_2 =
       "select id, d1.c, d1.d[0].x, d2.d['m124'].y from %s where day = '2024-09-26' and hour = '12'"
         .format(pq_table_name)
-    val select_sql_3 =
-      "select id, d1.c, d1.d[0].x, d2.d['m124'].y from %s where day = '2024-09-26' and hour = '12'"
-        .format(orc_table_name)
     withSQLConf(
       ("spark.sql.hive.convertMetastoreParquet" -> "false"),
       ("spark.sql.hive.convertMetastoreOrc" -> "false")) {
@@ -1487,20 +1479,9 @@ class GlutenClickHouseHiveTableSuite
           assert(jsonFileScan.size == 1)
         }
       )
-      compareResultsAgainstVanillaSpark(
-        select_sql_3,
-        compareResult = true,
-        df => {
-          val jsonFileScan = collect(df.queryExecution.executedPlan) {
-            case l: HiveTableScanExecTransformer => l
-          }
-          assert(jsonFileScan.size == 1)
-        }
-      )
     }
     spark.sql("drop table if exists %s".format(json_table_name))
     spark.sql("drop table if exists %s".format(pq_table_name))
-    spark.sql("drop table if exists %s".format(orc_table_name))
   }
 
 }

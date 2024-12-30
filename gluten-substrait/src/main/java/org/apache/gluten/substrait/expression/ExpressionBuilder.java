@@ -246,6 +246,14 @@ public class ExpressionBuilder {
     return new ScalarFunctionNode(functionId, expressionNodes, typeNode);
   }
 
+  public static ScalarFunctionNode makeScalarFunction(
+      Long functionId,
+      List<ExpressionNode> expressionNodes,
+      TypeNode typeNode,
+      Map<String, List<String>> options) {
+    return new ScalarFunctionNode(functionId, expressionNodes, typeNode, options);
+  }
+
   public static SelectionNode makeSelection(Integer fieldIdx) {
     return new SelectionNode(fieldIdx);
   }

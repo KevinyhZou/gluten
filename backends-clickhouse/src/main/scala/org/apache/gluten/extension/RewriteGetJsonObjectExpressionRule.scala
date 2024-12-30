@@ -17,6 +17,7 @@
 package org.apache.gluten.extension
 
 import org.apache.gluten.GlutenConfig
+import org.apache.gluten.expression.GetJsonObjectExpressionTransformer
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions._
@@ -61,7 +62,8 @@ class RewriteGetJsonObjectExpressionRule(spark: SparkSession) extends Rule[Logic
   private def optimizeNestedFunctionCalls(
       expr: Expression,
       path: String = "",
-      isNested: Boolean = false): Expression = {
+      isNested: Boolean = false,
+      originalPaths: Seq[String] = Seq.empty[String]): Expression = {
 
     def getPath(expr: Expression): String = expr match {
       case l: Literal if l.dataType.isInstanceOf[StringType] =>
@@ -73,15 +75,28 @@ class RewriteGetJsonObjectExpressionRule(spark: SparkSession) extends Rule[Logic
 
     expr match {
       case g: GetJsonObject =>
-        val gPath = getPath(g.path).replace("$", "")
-        val newPath = gPath + path
-        optimizeNestedFunctionCalls(g.json, newPath, isNested = true)
+        val gPath = getPath(g.path)
+        var paths = originalPaths
+        paths :+= gPath
+        val newPath = gPath.replace("$", "") + path
+        optimizeNestedFunctionCalls(g.json, newPath, isNested = true, originalPaths = paths)
       case _ =>
         val newChildren = expr.children.map(x => optimizeNestedFunctionCalls(x, path))
         val newExpr = expr.withNewChildren(newChildren)
         if (isNested) {
           val pathExpr = Literal.apply("$" + path)
-          GetJsonObject(newExpr, pathExpr)
+          val newGetJsonObjectExpr = GetJsonObject(newExpr, pathExpr)
+          if (originalPaths.size > 1) {
+            newGetJsonObjectExpr.setTagValue(
+              GetJsonObjectExpressionTransformer.TAG_GET_JSON_OBJECT_REWRITE,
+              true)
+            newGetJsonObjectExpr.setTagValue(
+              GetJsonObjectExpressionTransformer.TAG_GET_JSON_OBJECT_ORIGINAL_PATHS,
+              originalPaths)
+            newGetJsonObjectExpr
+          } else {
+            newGetJsonObjectExpr
+          }
         } else {
           newExpr
         }

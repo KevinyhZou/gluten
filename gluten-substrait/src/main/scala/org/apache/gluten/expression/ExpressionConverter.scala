@@ -708,6 +708,12 @@ object ExpressionConverter extends SQLConfHelper with Logging {
           replaceWithExpressionTransformer0(ss.limit, attributeSeq, expressionsMap),
           ss
         )
+      case g: GetJsonObject =>
+        GetJsonObjectExpressionTransformer(
+          substraitExprName,
+          g.children.map(replaceWithExpressionTransformer0(_, attributeSeq, expressionsMap)),
+          g
+        )
       case expr =>
         GenericExpressionTransformer(
           substraitExprName,

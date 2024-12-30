@@ -20,15 +20,27 @@ import org.apache.gluten.substrait.type.TypeNode;
 
 import io.substrait.proto.Expression;
 import io.substrait.proto.FunctionArgument;
+import io.substrait.proto.FunctionOption;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class ScalarFunctionNode implements ExpressionNode, Serializable {
   private final Long functionId;
   private final List<ExpressionNode> expressionNodes = new ArrayList<>();
   private final TypeNode typeNode;
+  private Map<String, List<String>> functionOptions;
+
+  ScalarFunctionNode(
+      Long functionId,
+      List<ExpressionNode> expressionNodes,
+      TypeNode typeNode,
+      Map<String, List<String>> options) {
+    this(functionId, expressionNodes, typeNode);
+    this.functionOptions = options;
+  }
 
   ScalarFunctionNode(Long functionId, List<ExpressionNode> expressionNodes, TypeNode typeNode) {
     this.functionId = functionId;
@@ -44,6 +56,16 @@ public class ScalarFunctionNode implements ExpressionNode, Serializable {
       FunctionArgument.Builder functionArgument = FunctionArgument.newBuilder();
       functionArgument.setValue(expressionNode.toProtobuf());
       scalarBuilder.addArguments(functionArgument.build());
+    }
+    for (String optionKey : functionOptions.keySet()) {
+      List<String> optionValues = functionOptions.get(optionKey);
+      FunctionOption.Builder functionOptionBuilder = FunctionOption.newBuilder();
+      functionOptionBuilder.setName(optionKey);
+      for (int i = 0; i < optionValues.size(); ++i) {
+        String optionValue = optionValues.get(i);
+        functionOptionBuilder.setPreference(i, optionValue);
+      }
+      scalarBuilder.addOptions(functionOptionBuilder);
     }
     scalarBuilder.setOutputType(typeNode.toProtobuf());
 

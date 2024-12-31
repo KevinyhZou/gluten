@@ -16,9 +16,8 @@
  */
 package org.apache.gluten.extension.columnar
 
-import org.apache.gluten.GlutenConfig
-import org.apache.gluten.expression.GetJsonObjectExpressionTransformer
 import org.apache.gluten.config.GlutenConfig
+import org.apache.gluten.expression.GetJsonObjectExpressionTransformer
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions._
@@ -81,7 +80,7 @@ class RewriteNestedGetJsonObjectExpressionRule(spark: SparkSession) extends Rule
         if (gPath != null) {
           newPath = gPath.replace("$", "") + path
         }
-        val res = optimizeNestedFunctions(g.json, newPath, isNested = true)
+        val res = optimizeNestedFunctions(g.json, newPath, isNested = true, originalPaths = paths)
         if (gPath != null) {
           res
         } else {

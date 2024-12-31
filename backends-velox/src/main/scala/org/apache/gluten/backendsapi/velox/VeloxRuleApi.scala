@@ -58,7 +58,6 @@ object VeloxRuleApi {
     // Inject the regular Spark rules directly.
     injector.injectOptimizerRule(CollectRewriteRule.apply)
     injector.injectOptimizerRule(HLLRewriteRule.apply)
-    injector.injectOptimizerRule(RewriteNestedGetJsonObjectExpressionRule.apply)
     injector.injectPostHocResolutionRule(ArrowConvertorRule.apply)
   }
 

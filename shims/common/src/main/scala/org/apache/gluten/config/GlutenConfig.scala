@@ -102,12 +102,14 @@ class GlutenConfig(conf: SQLConf) extends Logging {
   def enableRewriteDateTimestampComparison: Boolean = getConf(
     ENABLE_REWRITE_DATE_TIMESTAMP_COMPARISON)
 
+  def enableRewriteNestedGetJsonObject: Boolean = getConf(ENABLE_REWRITE_NESTED_GET_JSON_OBJECT)
+
   def enableCHRewriteDateConversion: Boolean = getConf(ENABLE_CH_REWRITE_DATE_CONVERSION)
 
   def enableCommonSubexpressionEliminate: Boolean = getConf(ENABLE_COMMON_SUBEXPRESSION_ELIMINATE)
 
   def enableCountDistinctWithoutExpand: Boolean = getConf(ENABLE_COUNT_DISTINCT_WITHOUT_EXPAND)
-  
+
   def enableExtendedColumnPruning: Boolean =
     getConf(ENABLE_EXTENDED_COLUMN_PRUNING)
 

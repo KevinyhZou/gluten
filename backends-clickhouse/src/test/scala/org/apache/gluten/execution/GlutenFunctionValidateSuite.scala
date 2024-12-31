@@ -21,6 +21,7 @@ import org.apache.gluten.utils.UTSystemParameters
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row, TestUtils}
+import org.apache.spark.sql.catalyst.expressions.{Expression, GetJsonObject, Literal}
 import org.apache.spark.sql.catalyst.optimizer.{ConstantFolding, NullPropagation}
 import org.apache.spark.sql.execution.datasources.v2.clickhouse.ClickHouseConfig
 import org.apache.spark.sql.internal.SQLConf
@@ -90,7 +91,9 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
         Row(1.011, 5, "{\"a\":\"b\", \"x\":{\"i\":1}}"),
         Row(1.011, 5, "{\"a\":\"b\", \"x\":{\"i\":2}}"),
         Row(1.011, 5, "{\"a\":1, \"x\":{\"i\":2}}"),
-        Row(1.0, 5, "{\"a\":\"{\\\"x\\\":5}\"}")
+        Row(1.0, 5, "{\"a\":\"{\\\"x\\\":5}\"}"),
+        Row(1.0, 6, "{\"a\":{\"y\": 5, \"z\": {\"m\":1, \"n\": {\"p\": \"k\"}}}"),
+        Row(1.0, 7, "{\"a\":[{\"y\": 5}, {\"z\":[{\"m\":1, \"n\":{\"p\":\"k\"}}]}]}")
       ))
     val dfParquet = spark.createDataFrame(data, schema)
     dfParquet
@@ -265,6 +268,71 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
     runQueryAndCompare(
       "SELECT get_json_object(get_json_object(string_field1, '$.a'), '$.x') from json_test") {
       checkGlutenOperatorMatch[ProjectExecTransformer]
+    }
+  }
+
+  test("GLUTEN-8304: Optimize nested get_json_object") {
+    def checkExpression(expr: Expression, path: String): Boolean = {
+      expr match {
+        case g: GetJsonObject
+            if g.path.isInstanceOf[Literal] && g.path.dataType.isInstanceOf[StringType] =>
+          g.path.asInstanceOf[Literal].value.toString.equals(path)
+        case _ =>
+          if (expr.children.isEmpty) {
+            false
+          } else {
+            expr.children.exists(c => checkExpression(c, path))
+          }
+      }
+    }
+    def checkGetJsonObjectPath(df: DataFrame, path: String): Boolean = {
+      val plans = getExecutedPlan(df)
+      var res = true
+      plans.foreach {
+        case p: ProjectExecTransformer =>
+          res = p.projectList.exists(x => checkExpression(x, path))
+        case f: FilterExecTransformer =>
+          res = checkExpression(f.condition, path)
+        case _ =>
+      }
+      res
+    }
+    withSQLConf(("spark.gluten.sql.rewrite.nestedGetJsonObject", "true")) {
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(string_field1, '$.a'), '$.y') " +
+          " from json_test where int_field1 = 6")(x => checkGetJsonObjectPath(x, "$.a.y"))
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(string_field1, '$[a]', '$[y]') " +
+          " from json_test where int_field1 = 6")(x => checkGetJsonObjectPath(x, "$[a][y]"))
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(get_json_object(string_field1, " +
+          "'$.a'), '$.y'), '$.z') from json_test where int_field1 = 6")(
+        x => checkGetJsonObjectPath(x, "$.a.y.z"))
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(get_json_object(string_field1, '$.a')," +
+          " string_field1), '$.z') from json_test where int_field1 = 6") {
+        x => checkGetJsonObjectPath(x, "$.a") && checkGetJsonObjectPath(x, "$.z")
+      }
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(get_json_object(string_field1, " +
+          " string_field1), '$.a'), '$.z') from json_test where int_field1 = 6")(
+        x => checkGetJsonObjectPath(x, "$.a.z"))
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(get_json_object(" +
+          " substring(string_field1, 10), '$.a'), '$.z'), string_field1) " +
+          " from json_test where int_field1 = 6")(x => checkGetJsonObjectPath(x, "$.a.z"))
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(string_field1, '$.a[0]'), '$.y') " +
+          " from json_test where int_field1 = 7")(x => checkGetJsonObjectPath(x, "$.a[0].y"))
+      runQueryAndCompare(
+        "select get_json_object(get_json_object(get_json_object(string_field1, " +
+          " '$.a[1]'), '$.z[1]'), '$.n') from json_test where int_field1 = 7") {
+        x => checkGetJsonObjectPath(x, "$.a[1].z[1].n")
+      }
+      runQueryAndCompare(
+        "select * from json_test where " +
+          " get_json_object(get_json_object(get_json_object(string_field1, '$.a'), " +
+          "'$.y'), '$.z') != null")(x => checkGetJsonObjectPath(x, "$.a.y.z"))
     }
   }
 

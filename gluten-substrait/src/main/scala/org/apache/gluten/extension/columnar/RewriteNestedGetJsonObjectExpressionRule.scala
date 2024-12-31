@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.extension.columnar
 
-import org.apache.gluten.GlutenConfig
+import org.apache.gluten.config.GlutenConfig
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions._
@@ -28,8 +28,8 @@ class RewriteNestedGetJsonObjectExpressionRule(spark: SparkSession) extends Rule
   override def apply(plan: LogicalPlan): LogicalPlan = {
     if (
       plan.resolved
-      && GlutenConfig.getConf.enableGluten
-      && GlutenConfig.getConf.enableRewriteNestedGetJsonObject
+      && GlutenConfig.get.enableGluten
+      && GlutenConfig.get.enableRewriteNestedGetJsonObject
     ) {
       visitPlan(plan)
     } else {
@@ -42,14 +42,14 @@ class RewriteNestedGetJsonObjectExpressionRule(spark: SparkSession) extends Rule
       var newProjectList = Seq.empty[NamedExpression]
       p.projectList.foreach {
         case a: Alias if a.child.isInstanceOf[GetJsonObject] =>
-          newProjectList :+= optimizeNestedFunctionCalls(a).asInstanceOf[NamedExpression]
+          newProjectList :+= optimizeNestedFunctions(a).asInstanceOf[NamedExpression]
         case p =>
           newProjectList :+= p
       }
       val newChild = visitPlan(p.child)
       Project(newProjectList, newChild)
     case f: Filter =>
-      val newCond = optimizeNestedFunctionCalls(f.condition)
+      val newCond = optimizeNestedFunctions(f.condition)
       val newChild = visitPlan(f.child)
       Filter(newCond, newChild)
     case other =>
@@ -57,9 +57,9 @@ class RewriteNestedGetJsonObjectExpressionRule(spark: SparkSession) extends Rule
       plan.withNewChildren(children)
   }
 
-  private def optimizeNestedFunctionCalls(
+  private def optimizeNestedFunctions(
       expr: Expression,
-      path: Expression = Literal.apply(""),
+      path: String = "",
       isNested: Boolean = false): Expression = {
 
     def getPathLiteral(path: Expression): Option[String] = path match {
@@ -69,17 +69,14 @@ class RewriteNestedGetJsonObjectExpressionRule(spark: SparkSession) extends Rule
         Option.empty
     }
 
-    val pathValue = getPathLiteral(path).orNull
     expr match {
       case g: GetJsonObject =>
         val gPath = getPathLiteral(g.path).orNull
-        var newPath = null.asInstanceOf[Expression]
+        var newPath = ""
         if (gPath != null) {
-          newPath = Literal.apply(gPath.replace("$", "") + pathValue)
-        } else {
-          newPath = Literal.apply("")
+          newPath = gPath.replace("$", "") + path
         }
-        val res = optimizeNestedFunctionCalls(g.json, newPath, isNested = true)
+        val res = optimizeNestedFunctions(g.json, newPath, isNested = true)
         if (gPath != null) {
           res
         } else {
@@ -87,17 +84,17 @@ class RewriteNestedGetJsonObjectExpressionRule(spark: SparkSession) extends Rule
           newChildren :+= res
           newChildren :+= g.path
           val newExpr = g.withNewChildren(newChildren)
-          if (pathValue.nonEmpty) {
-            GetJsonObject(newExpr, Literal.apply("$" + pathValue))
+          if (path.nonEmpty) {
+            GetJsonObject(newExpr, Literal.apply("$" + path))
           } else {
             newExpr
           }
         }
       case _ =>
-        val newChildren = expr.children.map(x => optimizeNestedFunctionCalls(x, path))
+        val newChildren = expr.children.map(x => optimizeNestedFunctions(x, path))
         val newExpr = expr.withNewChildren(newChildren)
-        if (isNested && pathValue.nonEmpty) {
-          val pathExpr = Literal.apply("$" + pathValue)
+        if (isNested && path.nonEmpty) {
+          val pathExpr = Literal.apply("$" + path)
           GetJsonObject(newExpr, pathExpr)
         } else {
           newExpr

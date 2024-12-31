@@ -16,17 +16,20 @@
  */
 package org.apache.gluten.backendsapi
 
-import org.apache.gluten.GlutenConfig
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.extension.ValidationResult
 import org.apache.gluten.extension.columnar.transition.Convention
+import org.apache.gluten.substrait.rel.LocalFilesNode
 import org.apache.gluten.substrait.rel.LocalFilesNode.ReadFileFormat
 
 import org.apache.spark.sql.catalyst.catalog.BucketSpec
 import org.apache.spark.sql.catalyst.expressions.{Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.plans._
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.execution.command.CreateDataSourceTableAsSelectCommand
 import org.apache.spark.sql.execution.datasources.{FileFormat, InsertIntoHadoopFsRelationCommand}
 import org.apache.spark.sql.types.StructField
+import org.apache.spark.util.SerializableConfiguration
 
 trait BackendSettingsApi {
 
@@ -37,7 +40,13 @@ trait BackendSettingsApi {
       format: ReadFileFormat,
       fields: Array[StructField],
       rootPaths: Seq[String],
-      properties: Map[String, String]): ValidationResult = ValidationResult.succeeded
+      properties: Map[String, String],
+      serializableHadoopConf: Option[SerializableConfiguration] = None): ValidationResult =
+    ValidationResult.succeeded
+
+  def getSubstraitReadFileFormatV1(fileFormat: FileFormat): LocalFilesNode.ReadFileFormat
+
+  def getSubstraitReadFileFormatV2(scan: Scan): LocalFilesNode.ReadFileFormat
 
   def supportWriteFilesExec(
       format: FileFormat,
@@ -59,7 +68,7 @@ trait BackendSettingsApi {
     false
   }
   def supportColumnarShuffleExec(): Boolean = {
-    GlutenConfig.getConf.enableColumnarShuffle
+    GlutenConfig.get.enableColumnarShuffle
   }
   def enableJoinKeysRewrite(): Boolean = true
   def supportHashBuildJoinTypeOnLeft: JoinType => Boolean = {

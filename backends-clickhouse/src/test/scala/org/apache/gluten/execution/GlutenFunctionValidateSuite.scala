@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.GlutenConfig
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.utils.UTSystemParameters
 
 import org.apache.spark.SparkConf
@@ -659,6 +659,24 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
           "order by hash(id%10), hash(hash(id%10))") {
         df => checkOperatorCount[ProjectExecTransformer](3)(df)
       }
+
+      runQueryAndCompare(s"""
+                            |SELECT 'test' AS test
+                            |  , Sum(CASE
+                            |    WHEN name = '2' THEN 0
+                            |      ELSE id
+                            |    END) AS c1
+                            |  , Sum(CASE
+                            |    WHEN name = '2' THEN id
+                            |      ELSE 0
+                            |    END) AS c2
+                            | , CASE WHEN name = '2' THEN Sum(id) ELSE 0
+                            |   END AS c3
+                            |FROM (select id, cast(id as string) name from range(10))
+                            |GROUP BY name
+                            |""".stripMargin) {
+        df => checkOperatorCount[ProjectExecTransformer](3)(df)
+      }
     }
   }
 
@@ -858,6 +876,18 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
 
   test("GLUTEN-7796 cast bool to string") {
     val sql = "select cast(id % 2 = 1 as string) from range(10)"
+    compareResultsAgainstVanillaSpark(sql, true, { _ => })
+  }
+
+  test("Test transform_keys/transform_values") {
+    val sql = """
+                |select
+                |  transform_keys(map_from_arrays(array(id+1, id+2, id+3),
+                |    array(1, id+2, 3)), (k, v) -> k + 1),
+                |  transform_values(map_from_arrays(array(id+1, id+2, id+3),
+                |    array(1, id+2, 3)), (k, v) -> v + 1)
+                |from range(10)
+                |""".stripMargin
     compareResultsAgainstVanillaSpark(sql, true, { _ => })
   }
 }

@@ -17,14 +17,15 @@
 package org.apache.gluten.backendsapi.clickhouse
 
 import org.apache.gluten.GlutenBuildInfo._
-import org.apache.gluten.GlutenConfig
 import org.apache.gluten.backendsapi._
 import org.apache.gluten.columnarbatch.CHBatch
 import org.apache.gluten.component.Component.BuildInfo
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution.WriteFilesExecTransformer
 import org.apache.gluten.expression.WindowFunctionsBuilder
 import org.apache.gluten.extension.ValidationResult
 import org.apache.gluten.extension.columnar.transition.{Convention, ConventionFunc}
+import org.apache.gluten.substrait.rel.LocalFilesNode
 import org.apache.gluten.substrait.rel.LocalFilesNode.ReadFileFormat
 import org.apache.gluten.substrait.rel.LocalFilesNode.ReadFileFormat._
 
@@ -34,6 +35,7 @@ import org.apache.spark.sql.catalyst.catalog.BucketSpec
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.plans._
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.datasources.FileFormat
@@ -41,6 +43,7 @@ import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
+import org.apache.spark.util.SerializableConfiguration
 
 import java.util.Locale
 
@@ -164,7 +167,8 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
       format: ReadFileFormat,
       fields: Array[StructField],
       rootPaths: Seq[String],
-      properties: Map[String, String]): ValidationResult = {
+      properties: Map[String, String],
+      serializableHadoopConf: Option[SerializableConfiguration] = None): ValidationResult = {
 
     // Validate if all types are supported.
     def hasComplexType: Boolean = {
@@ -195,6 +199,27 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
         }
       case JsonReadFormat => ValidationResult.succeeded
       case _ => ValidationResult.failed(s"Unsupported file format $format")
+    }
+  }
+
+  override def getSubstraitReadFileFormatV1(
+      fileFormat: FileFormat): LocalFilesNode.ReadFileFormat = {
+    fileFormat.getClass.getSimpleName match {
+      case "OrcFileFormat" => ReadFileFormat.OrcReadFormat
+      case "ParquetFileFormat" => ReadFileFormat.ParquetReadFormat
+      case "DeltaParquetFileFormat" => ReadFileFormat.ParquetReadFormat
+      case "DeltaMergeTreeFileFormat" => ReadFileFormat.MergeTreeReadFormat
+      case "CSVFileFormat" => ReadFileFormat.TextReadFormat
+      case _ => ReadFileFormat.UnknownFormat
+    }
+  }
+
+  override def getSubstraitReadFileFormatV2(scan: Scan): LocalFilesNode.ReadFileFormat = {
+    scan.getClass.getSimpleName match {
+      case "OrcScan" => ReadFileFormat.OrcReadFormat
+      case "ParquetScan" => ReadFileFormat.ParquetReadFormat
+      case "ClickHouseScan" => ReadFileFormat.MergeTreeReadFormat
+      case _ => ReadFileFormat.UnknownFormat
     }
   }
 
@@ -257,11 +282,11 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   }
 
   override def supportSortExec(): Boolean = {
-    GlutenConfig.getConf.enableColumnarSort
+    GlutenConfig.get.enableColumnarSort
   }
 
   override def supportSortMergeJoinExec(): Boolean = {
-    GlutenConfig.getConf.enableColumnarSortMergeJoin
+    GlutenConfig.get.enableColumnarSortMergeJoin
   }
 
   override def supportWindowExec(windowFunctions: Seq[NamedExpression]): Boolean = {
@@ -350,6 +375,13 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
     )
   }
 
+  def enablePreProjectionForJoinConditions(): Boolean = {
+    SparkEnv.get.conf.getBoolean(
+      CHConf.runtimeConfig("enable_pre_projection_for_join_conditions"),
+      defaultValue = true
+    )
+  }
+
   // If the partition keys are high cardinality, the aggregation method is slower.
   def enableConvertWindowGroupLimitToAggregate(): Boolean = {
     SparkEnv.get.conf.getBoolean(
@@ -359,7 +391,7 @@ object CHBackendSettings extends BackendSettingsApi with Logging {
   }
 
   override def enableNativeWriteFiles(): Boolean = {
-    GlutenConfig.getConf.enableNativeWriter.getOrElse(false)
+    GlutenConfig.get.enableNativeWriter.getOrElse(false)
   }
 
   override def supportCartesianProductExec(): Boolean = true

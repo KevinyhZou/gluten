@@ -16,8 +16,8 @@
  */
 package org.apache.spark.shuffle
 
-import org.apache.gluten.GlutenConfig
 import org.apache.gluten.backendsapi.BackendsApiManager
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.sql.shims.SparkShimLoader
 import org.apache.gluten.vectorized.NativePartitioning
 
@@ -43,16 +43,15 @@ object GlutenShuffleUtils {
     }
   }
 
-  def checkCodecValues(codecConf: String, codec: String, validValues: Set[String]): Unit = {
-    if (!validValues.contains(codec)) {
-      throw new IllegalArgumentException(
-        s"The value of $codecConf should be one of " +
-          s"${validValues.mkString(", ")}, but was $codec")
-    }
-  }
-
   def getCompressionCodec(conf: SparkConf): String = {
-    val glutenConfig = GlutenConfig.getConf
+    def checkCodecValues(codecConf: String, codec: String, validValues: Set[String]): Unit = {
+      if (!validValues.contains(codec)) {
+        throw new IllegalArgumentException(
+          s"The value of $codecConf should be one of " +
+            s"${validValues.mkString(", ")}, but was $codec")
+      }
+    }
+    val glutenConfig = GlutenConfig.get
     glutenConfig.columnarShuffleCodec match {
       case Some(codec) =>
         val glutenCodecKey = GlutenConfig.COLUMNAR_SHUFFLE_CODEC.key
@@ -92,7 +91,7 @@ object GlutenShuffleUtils {
     }
   }
 
-  def getCompressionBufferSize(conf: SparkConf, codec: String): Int = {
+  def getSortEvictBufferSize(conf: SparkConf, codec: String): Int = {
     def checkAndGetBufferSize(entry: ConfigEntry[Long]): Int = {
       val bufferSize = conf.get(entry).toInt
       if (bufferSize < 4) {
@@ -105,7 +104,7 @@ object GlutenShuffleUtils {
     } else if ("zstd" == codec) {
       checkAndGetBufferSize(IO_COMPRESSION_ZSTD_BUFFERSIZE)
     } else {
-      GlutenConfig.GLUTEN_SHUFFLE_DEFUALT_COMPRESSION_BUFFER_SIZE
+      checkAndGetBufferSize(SHUFFLE_DISK_WRITE_BUFFER_SIZE)
     }
   }
 

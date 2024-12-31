@@ -17,6 +17,7 @@
 package org.apache.gluten.execution
 
 import org.apache.gluten.backendsapi.BackendsApiManager
+import org.apache.gluten.expression.ExpressionConverter
 import org.apache.gluten.extension.ValidationResult
 import org.apache.gluten.metrics.MetricsUpdater
 import org.apache.gluten.sql.shims.SparkShimLoader
@@ -102,7 +103,12 @@ abstract class FileSourceScanExecTransformerBase(
       .genFileSourceScanTransformerMetrics(sparkContext)
       .filter(m => !driverMetricsAlias.contains(m._1)) ++ driverMetricsAlias
 
-  override def filterExprs(): Seq[Expression] = dataFiltersInScan
+  override def filterExprs(): Seq[Expression] = dataFiltersInScan.filter {
+    expr =>
+      ExpressionConverter.canReplaceWithExpressionTransformer(
+        ExpressionConverter.replaceAttributeReference(expr),
+        output)
+  }
 
   override def getMetadataColumns(): Seq[AttributeReference] = metadataColumns
 
@@ -184,15 +190,7 @@ abstract class FileSourceScanExecTransformerBase(
   }
 
   @transient override lazy val fileFormat: ReadFileFormat =
-    relation.fileFormat.getClass.getSimpleName match {
-      case "OrcFileFormat" => ReadFileFormat.OrcReadFormat
-      case "ParquetFileFormat" => ReadFileFormat.ParquetReadFormat
-      case "DeltaParquetFileFormat" => ReadFileFormat.ParquetReadFormat
-      case "DwrfFileFormat" => ReadFileFormat.DwrfReadFormat
-      case "DeltaMergeTreeFileFormat" => ReadFileFormat.MergeTreeReadFormat
-      case "CSVFileFormat" => ReadFileFormat.TextReadFormat
-      case _ => ReadFileFormat.UnknownFormat
-    }
+    BackendsApiManager.getSettings.getSubstraitReadFileFormatV1(relation.fileFormat)
 
   override def simpleString(maxFields: Int): String = {
     val metadataEntries = metadata.toSeq.sorted.map {

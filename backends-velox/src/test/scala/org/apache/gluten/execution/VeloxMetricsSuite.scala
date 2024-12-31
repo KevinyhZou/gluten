@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.GlutenConfig
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.sql.shims.SparkShimLoader
 
 import org.apache.spark.SparkConf
@@ -262,5 +262,17 @@ class VeloxMetricsSuite extends VeloxWholeStageTransformerSuite with AdaptiveSpa
           }
         }
     }
+  }
+
+  test("Velox cache metrics") {
+    val df = spark.sql(s"SELECT * FROM metrics_t1")
+    val scans = collect(df.queryExecution.executedPlan) {
+      case scan: FileSourceScanExecTransformer => scan
+    }
+    df.collect()
+    assert(scans.length === 1)
+    val metrics = scans.head.metrics
+    assert(metrics("storageReadBytes").value > 0)
+    assert(metrics("ramReadBytes").value == 0)
   }
 }

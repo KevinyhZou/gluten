@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.GlutenConfig
+import org.apache.gluten.config.GlutenConfig
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row, TestUtils}
@@ -292,6 +292,17 @@ class VeloxTPCHV1Suite extends VeloxTPCHSuite {
     super.sparkConf
       .set("spark.sql.sources.useV1SourceList", "parquet")
       .set("spark.sql.autoBroadcastJoinThreshold", "-1")
+  }
+}
+
+class VeloxTPCHV1GlutenShuffleManagerSuite extends VeloxTPCHSuite {
+  override def subType(): String = "v1-gluten-shuffle-manager"
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.sql.sources.useV1SourceList", "parquet")
+      .set("spark.sql.autoBroadcastJoinThreshold", "-1")
+      .set("spark.shuffle.manager", "org.apache.spark.shuffle.GlutenShuffleManager")
   }
 }
 

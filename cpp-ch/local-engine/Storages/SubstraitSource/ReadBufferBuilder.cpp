@@ -33,6 +33,7 @@
 #include <IO/SeekableReadBuffer.h>
 #include <IO/SharedThreadPools.h>
 #include <IO/SplittableBzip2ReadBuffer.h>
+#include <IO/ParallelReadBuffer.h>
 #include <Interpreters/Cache/FileCache.h>
 #include <Interpreters/Cache/FileCacheFactory.h>
 #include <Interpreters/Cache/FileCacheSettings.h>
@@ -74,6 +75,7 @@ extern const SettingsUInt64 s3_retry_attempts;
 extern const SettingsMaxThreads max_download_threads;
 extern const SettingsUInt64 max_download_buffer_size;
 extern const SettingsBool input_format_allow_seeks;
+extern const SettingsUInt64 max_read_buffer_size;
 }
 namespace ErrorCodes
 {
@@ -217,7 +219,7 @@ adjustReadRangeIfNeeded(std::unique_ptr<SeekableReadBuffer> read_buffer, const s
 class LocalFileReadBufferBuilder : public ReadBufferBuilder
 {
 public:
-    explicit LocalFileReadBufferBuilder(DB::ContextPtr context_) : ReadBufferBuilder(context_) { }
+    explicit LocalFileReadBufferBuilder(const DB::ContextPtr & context_) : ReadBufferBuilder(context_) { }
     ~LocalFileReadBufferBuilder() override = default;
 
     bool isRemote() const override { return false; }
@@ -429,8 +431,7 @@ public:
         if (object_size > 0)
             buffer_size = std::min(object_size, buffer_size);
         auto async_reader
-            = std::make_unique<DB::AsynchronousBoundedReadBuffer>(std::move(s3_impl), pool_reader, read_settings, buffer_size);
-
+            = std::make_unique<DB::AsynchronousBoundedReadBuffer>(std::move(s3_impl), pool_reader, read_settings, buffer_size,read_settings.remote_read_min_bytes_for_seek);
         if (read_settings.remote_fs_prefetch)
             async_reader->prefetch(Priority{});
 
@@ -691,7 +692,7 @@ ReadBufferBuilder::ReadBufferBuilder(const DB::ContextPtr & context_) : context(
 }
 
 std::unique_ptr<DB::ReadBuffer>
-ReadBufferBuilder::wrapWithBzip2(std::unique_ptr<DB::ReadBuffer> in, const substrait::ReadRel::LocalFiles::FileOrFiles & file_info)
+ReadBufferBuilder::wrapWithBzip2(std::unique_ptr<DB::ReadBuffer> in, const substrait::ReadRel::LocalFiles::FileOrFiles & file_info) const
 {
     /// Bzip2 compressed file is splittable and we need to adjust read range for each split
     auto * seekable = dynamic_cast<SeekableReadBuffer *>(in.release());
@@ -753,8 +754,9 @@ ReadBufferBuilder::wrapWithBzip2(std::unique_ptr<DB::ReadBuffer> in, const subst
     bounded_in->setReadUntilPosition(new_end);
     bool first_block_need_special_process = (new_start > 0);
     bool last_block_need_special_process = (new_end < file_size);
+    size_t buffer_size = context->getSettingsRef()[DB::Setting::max_read_buffer_size];
     auto decompressed_in = std::make_unique<SplittableBzip2ReadBuffer>(
-        std::move(bounded_in), first_block_need_special_process, last_block_need_special_process);
+        std::move(bounded_in), first_block_need_special_process, last_block_need_special_process, buffer_size);
     return std::move(decompressed_in);
 }
 

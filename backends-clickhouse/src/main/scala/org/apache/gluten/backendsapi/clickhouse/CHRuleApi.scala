@@ -16,9 +16,9 @@
  */
 package org.apache.gluten.backendsapi.clickhouse
 
-import org.apache.gluten.GlutenConfig
 import org.apache.gluten.backendsapi.RuleApi
 import org.apache.gluten.columnarbatch.CHBatch
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.extension._
 import org.apache.gluten.extension.columnar._
 import org.apache.gluten.extension.columnar.MiscColumnarRules.{RemoveGlutenTableCacheColumnarToRow, RemoveTopmostColumnarToRow, RewriteSubqueryBroadcast}
@@ -61,7 +61,7 @@ object CHRuleApi {
       (spark, parserInterface) => new GlutenClickhouseSqlParser(spark, parserInterface))
     injector.injectResolutionRule(spark => new RewriteToDateExpresstionRule(spark))
     injector.injectResolutionRule(spark => new RewriteDateTimestampComparisonRule(spark))
-    injector.injectResolutionRule(spark => new RewriteGetJsonObjectExpressionRule(spark))
+    injector.injectResolutionRule(spark => new RewriteNestedGetJsonObjectExpressionRule(spark))
     injector.injectOptimizerRule(spark => new CommonSubexpressionEliminateRule(spark))
     injector.injectOptimizerRule(spark => new ExtendedColumnPruning(spark))
     injector.injectOptimizerRule(spark => CHAggregateFunctionRewriteRule(spark))
@@ -94,8 +94,6 @@ object CHRuleApi {
 
     // Legacy: Post-transform rules.
     injector.injectPostTransform(_ => PruneNestedColumnsInHiveTableScan)
-    injector.injectPostTransform(_ => RemoveNativeWriteFilesSortAndProject())
-    injector.injectPostTransform(c => intercept(RewriteTransformer.apply(c.session)))
     injector.injectPostTransform(_ => PushDownFilterToScan)
     injector.injectPostTransform(_ => PushDownInputFileExpression.PostOffload)
     injector.injectPostTransform(_ => EnsureLocalSortRequirements)
@@ -112,6 +110,7 @@ object CHRuleApi {
             c.session)))
     injector.injectPostTransform(c => InsertTransitions.create(c.outputsColumnar, CHBatch))
     injector.injectPostTransform(c => RemoveDuplicatedColumns.apply(c.session))
+    injector.injectPostTransform(c => AddPreProjectionForHashJoin.apply(c.session))
 
     // Gluten columnar: Fallback policies.
     injector.injectFallbackPolicy(

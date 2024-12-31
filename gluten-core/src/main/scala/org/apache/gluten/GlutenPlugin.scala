@@ -17,8 +17,9 @@
 package org.apache.gluten
 
 import org.apache.gluten.GlutenBuildInfo._
-import org.apache.gluten.GlutenConfig._
 import org.apache.gluten.component.Component
+import org.apache.gluten.config.GlutenConfig
+import org.apache.gluten.config.GlutenConfig._
 import org.apache.gluten.events.GlutenBuildInfoEvent
 import org.apache.gluten.exception.GlutenException
 import org.apache.gluten.extension.GlutenSessionExtensions
@@ -94,7 +95,7 @@ private[gluten] class GlutenDriverPlugin extends DriverPlugin with Logging {
     val glutenBuildInfo = new mutable.LinkedHashMap[String, String]()
 
     val components = Component.sorted()
-    glutenBuildInfo.put("Components", components.map(_.buildInfo().name).mkString(","))
+    glutenBuildInfo.put("Components", components.map(_.buildInfo().name).mkString(", "))
     components.foreach {
       comp =>
         val buildInfo = comp.buildInfo()
@@ -248,6 +249,16 @@ private[gluten] class GlutenDriverPlugin extends DriverPlugin with Logging {
       throw new IllegalArgumentException(
         s"${COLUMNAR_VELOX_CACHE_ENABLED.key} and " +
           s"${COLUMNAR_VELOX_FILE_HANDLE_CACHE_ENABLED.key} should be enabled together.")
+    }
+
+    if (
+      conf.getBoolean(COLUMNAR_VELOX_CACHE_ENABLED.key, false) &&
+      conf.getSizeAsBytes(LOAD_QUANTUM.key, LOAD_QUANTUM.defaultValueString) > 8 * 1024 * 1024
+    ) {
+      throw new IllegalArgumentException(
+        s"Velox currently only support up to 8MB load quantum size " +
+          s"on SSD cache enabled by ${COLUMNAR_VELOX_CACHE_ENABLED.key}, " +
+          s"User can set ${LOAD_QUANTUM.key} <= 8MB skip this error.")
     }
   }
 }

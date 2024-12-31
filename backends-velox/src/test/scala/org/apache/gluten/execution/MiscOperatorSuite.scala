@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.GlutenConfig
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.expression.VeloxDummyExpression
 import org.apache.gluten.sql.shims.SparkShimLoader
 
@@ -1791,6 +1791,13 @@ class MiscOperatorSuite extends VeloxWholeStageTransformerSuite with AdaptiveSpa
     assert(plan2.find(_.isInstanceOf[ProjectExecTransformer]).isDefined)
   }
 
+  test("cast timestamp to date") {
+    val query = "select cast(ts as date) from values (timestamp'2024-01-01 00:00:00') as tab(ts)"
+    runQueryAndCompare(query) {
+      checkGlutenOperatorMatch[ProjectExecTransformer]
+    }
+  }
+
   test("timestamp broadcast join") {
     spark.range(0, 5).createOrReplaceTempView("right")
     spark.sql("SELECT id, timestamp_micros(id) as ts from right").createOrReplaceTempView("left")
@@ -1962,11 +1969,11 @@ class MiscOperatorSuite extends VeloxWholeStageTransformerSuite with AdaptiveSpa
   }
 
   test("test 'spark.gluten.enabled'") {
-    withSQLConf(GlutenConfig.GLUTEN_ENABLED_KEY -> "true") {
+    withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "true") {
       runQueryAndCompare("select * from lineitem limit 1") {
         checkGlutenOperatorMatch[FileSourceScanExecTransformer]
       }
-      withSQLConf(GlutenConfig.GLUTEN_ENABLED_KEY -> "false") {
+      withSQLConf(GlutenConfig.GLUTEN_ENABLED.key -> "false") {
         runQueryAndCompare("select * from lineitem limit 1") {
           checkSparkOperatorMatch[FileSourceScanExec]
         }

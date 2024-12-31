@@ -35,7 +35,6 @@
 #include <Core/ServerSettings.h>
 #include <Core/Settings.h>
 #include <DataTypes/DataTypeArray.h>
-#include <DataTypes/DataTypeDateTime64.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -54,20 +53,17 @@
 #include <Processors/Chunk.h>
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/QueryPlan.h>
-#include <QueryPipeline/QueryPipelineBuilder.h>
 #include <QueryPipeline/printPipeline.h>
 #include <Storages/Cache/CacheManager.h>
 #include <Storages/MergeTree/StorageMergeTreeFactory.h>
 #include <Storages/Output/WriteBufferBuilder.h>
 #include <Storages/SubstraitSource/ReadBufferBuilder.h>
 #include <boost/algorithm/string/case_conv.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <sys/resource.h>
 #include <Poco/Logger.h>
 #include <Poco/Util/MapConfiguration.h>
 #include <Common/BitHelpers.h>
 #include <Common/Config/ConfigProcessor.h>
-#include <Common/CurrentThread.h>
 #include <Common/GlutenSignalHandler.h>
 #include <Common/LoggerExtend.h>
 #include <Common/QueryContext.h>
@@ -86,6 +82,7 @@ namespace Setting
 {
 extern const SettingsUInt64 prefer_external_sort_block_bytes;
 extern const SettingsUInt64 max_bytes_before_external_sort;
+extern const SettingsDouble max_bytes_ratio_before_external_sort;
 extern const SettingsBool query_plan_merge_filters;
 extern const SettingsBool compile_expressions;
 extern const SettingsShortCircuitFunctionEvaluation short_circuit_function_evaluation;
@@ -316,8 +313,8 @@ DB::Block BlockUtil::concatenateBlocksMemoryEfficiently(std::vector<DB::Block> &
     for (const auto & block : blocks)
         num_rows += block.rows();
 
-    Block out = blocks[0].cloneEmpty();
-    MutableColumns columns = out.mutateColumns();
+    DB::Block out = blocks[0].cloneEmpty();
+    DB::MutableColumns columns = out.mutateColumns();
 
     for (size_t i = 0; i < columns.size(); ++i)
     {
@@ -338,7 +335,7 @@ DB::Block BlockUtil::concatenateBlocksMemoryEfficiently(std::vector<DB::Block> &
 size_t PODArrayUtil::adjustMemoryEfficientSize(size_t n)
 {
     /// According to definition of DEFUALT_BLOCK_SIZE
-    size_t padding_n = 2 * PADDING_FOR_SIMD - 1;
+    size_t padding_n = 2 * DB::PADDING_FOR_SIMD - 1;
     size_t rounded_n = roundUpToPowerOfTwoOrZero(n);
     size_t padded_n = n;
     if (rounded_n > n + n / 2)
@@ -351,86 +348,6 @@ size_t PODArrayUtil::adjustMemoryEfficientSize(size_t n)
         padded_n = rounded_n - padding_n;
     }
     return padded_n;
-}
-
-std::string PlanUtil::explainPlan(DB::QueryPlan & plan)
-{
-    constexpr DB::QueryPlan::ExplainPlanOptions buf_opt{
-        .header = true,
-        .actions = true,
-        .indexes = true,
-    };
-    DB::WriteBufferFromOwnString buf;
-    plan.explainPlan(buf, buf_opt);
-
-    return buf.str();
-}
-
-void PlanUtil::checkOuputType(const DB::QueryPlan & plan)
-{
-    // QueryPlan::checkInitialized is a private method, so we assume plan is initialized, otherwise there is a core dump here.
-    // It's okay, because it's impossible for us not to initialize where we call this method.
-    const auto & step = *plan.getRootNode()->step;
-
-    if (!step.hasOutputHeader())
-        return;
-    for (const auto & elem : step.getOutputHeader())
-    {
-        const DB::DataTypePtr & ch_type = elem.type;
-        const auto ch_type_without_nullable = DB::removeNullable(ch_type);
-        const DB::WhichDataType which(ch_type_without_nullable);
-        if (which.isDateTime64())
-        {
-            const auto * ch_type_datetime64 = checkAndGetDataType<DataTypeDateTime64>(ch_type_without_nullable.get());
-            if (ch_type_datetime64->getScale() != 6)
-                throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support converting from {}", ch_type->getName());
-        }
-        else if (which.isDecimal())
-        {
-            if (which.isDecimal256())
-                throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support converting from {}", ch_type->getName());
-
-            const auto scale = getDecimalScale(*ch_type_without_nullable);
-            const auto precision = getDecimalPrecision(*ch_type_without_nullable);
-            if (scale == 0 && precision == 0)
-                throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support converting from {}", ch_type->getName());
-        }
-    }
-}
-
-DB::IQueryPlanStep * PlanUtil::adjustQueryPlanHeader(DB::QueryPlan & plan, const DB::Block & to_header, const String & step_desc)
-{
-    auto convert_actions_dag = DB::ActionsDAG::makeConvertingActions(
-        plan.getCurrentHeader().getColumnsWithTypeAndName(),
-        to_header.getColumnsWithTypeAndName(),
-        ActionsDAG::MatchColumnsMode::Name);
-    auto expression_step = std::make_unique<DB::ExpressionStep>(plan.getCurrentHeader(), std::move(convert_actions_dag));
-    expression_step->setStepDescription(step_desc);
-    auto * step_ptr = expression_step.get();
-    plan.addStep(std::move(expression_step));
-    return step_ptr;
-}
-
-DB::IQueryPlanStep * PlanUtil::addRemoveNullableStep(DB::ContextPtr context, DB::QueryPlan & plan, const std::set<String> & columns)
-{
-    if (columns.empty())
-        return nullptr;
-    DB::ActionsDAG remove_nullable_actions_dag{plan.getCurrentHeader().getColumnsWithTypeAndName()};
-    for (const auto & col_name : columns)
-    {
-        if (const auto * required_node = remove_nullable_actions_dag.tryFindInOutputs(col_name))
-        {
-            auto function_builder = DB::FunctionFactory::instance().get("assumeNotNull", context);
-            DB::ActionsDAG::NodeRawConstPtrs args = {required_node};
-            const auto & node = remove_nullable_actions_dag.addFunction(function_builder, args, col_name);
-            remove_nullable_actions_dag.addOrReplaceInOutputs(node);
-        }
-    }
-    auto expression_step = std::make_unique<DB::ExpressionStep>(plan.getCurrentHeader(), std::move(remove_nullable_actions_dag));
-    expression_step->setStepDescription("Remove nullable properties");
-    auto * step_ptr = expression_step.get();
-    plan.addStep(std::move(expression_step));
-    return step_ptr;
 }
 
 NestedColumnExtractHelper::NestedColumnExtractHelper(const DB::Block & block_, bool case_insentive_)
@@ -504,9 +421,9 @@ const DB::ColumnWithTypeAndName * NestedColumnExtractHelper::findColumn(const DB
 const DB::ActionsDAG::Node * ActionsDAGUtil::convertNodeType(
     DB::ActionsDAG & actions_dag,
     const DB::ActionsDAG::Node * node,
-    const DataTypePtr & cast_to_type,
+    const DB::DataTypePtr & cast_to_type,
     const std::string & result_name,
-    CastType cast_type)
+    DB::CastType cast_type)
 {
     DB::ColumnWithTypeAndName type_name_col;
     type_name_col.name = cast_to_type->getName();
@@ -515,7 +432,7 @@ const DB::ActionsDAG::Node * ActionsDAGUtil::convertNodeType(
     const auto * right_arg = &actions_dag.addColumn(std::move(type_name_col));
     const auto * left_arg = node;
     DB::CastDiagnostic diagnostic = {node->result_name, node->result_name};
-    ColumnWithTypeAndName left_column{nullptr, node->result_type, {}};
+    DB::ColumnWithTypeAndName left_column{nullptr, node->result_type, {}};
     DB::ActionsDAG::NodeRawConstPtrs children = {left_arg, right_arg};
     auto func_base_cast = createInternalCast(std::move(left_column), cast_to_type, cast_type, diagnostic);
 
@@ -527,7 +444,7 @@ const DB::ActionsDAG::Node * ActionsDAGUtil::convertNodeTypeIfNeeded(
     const DB::ActionsDAG::Node * node,
     const DB::DataTypePtr & dst_type,
     const std::string & result_name,
-    CastType cast_type)
+    DB::CastType cast_type)
 {
     if (node->result_type->equals(*dst_type))
         return node;
@@ -727,6 +644,10 @@ void BackendInitializerUtil::initSettings(const SparkConfigs::ConfigMap & spark_
     settings[Setting::compile_expressions] = false;
     settings[Setting::short_circuit_function_evaluation] = ShortCircuitFunctionEvaluation::DISABLE;
     ///
+
+    // After https://github.com/ClickHouse/ClickHouse/pull/73422
+    // Since we already set max_bytes_before_external_sort, set max_bytes_ratio_before_external_sort to 0
+    settings[Setting::max_bytes_ratio_before_external_sort] = 0.;
 
     for (const auto & [key, value] : spark_conf_map)
     {

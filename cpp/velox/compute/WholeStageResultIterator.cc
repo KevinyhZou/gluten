@@ -41,6 +41,9 @@ const std::string kSkippedStrides = "skippedStrides";
 const std::string kProcessedStrides = "processedStrides";
 const std::string kRemainingFilterTime = "totalRemainingFilterTime";
 const std::string kIoWaitTime = "ioWaitWallNanos";
+const std::string kStorageReadBytes = "storageReadBytes";
+const std::string kLocalReadBytes = "localReadBytes";
+const std::string kRamReadBytes = "ramReadBytes";
 const std::string kPreloadSplits = "readyPreloadedSplits";
 const std::string kNumWrittenFiles = "numWrittenFiles";
 const std::string kWriteIOTime = "writeIOTime";
@@ -137,6 +140,7 @@ WholeStageResultIterator::WholeStageResultIterator(
             std::nullopt,
             customSplitInfo,
             nullptr,
+            true,
             deleteFiles,
             std::unordered_map<std::string, std::string>(),
             properties[idx]);
@@ -153,6 +157,7 @@ WholeStageResultIterator::WholeStageResultIterator(
             nullptr,
             std::unordered_map<std::string, std::string>(),
             0,
+            true,
             metadataColumn,
             properties[idx]);
       }
@@ -422,6 +427,10 @@ void WholeStageResultIterator::collectMetrics() {
       metrics_->get(Metrics::kRemainingFilterTime)[metricIndex] =
           runtimeMetric("sum", second->customStats, kRemainingFilterTime);
       metrics_->get(Metrics::kIoWaitTime)[metricIndex] = runtimeMetric("sum", second->customStats, kIoWaitTime);
+      metrics_->get(Metrics::kStorageReadBytes)[metricIndex] =
+          runtimeMetric("sum", second->customStats, kStorageReadBytes);
+      metrics_->get(Metrics::kLocalReadBytes)[metricIndex] = runtimeMetric("sum", second->customStats, kLocalReadBytes);
+      metrics_->get(Metrics::kRamReadBytes)[metricIndex] = runtimeMetric("sum", second->customStats, kRamReadBytes);
       metrics_->get(Metrics::kPreloadSplits)[metricIndex] =
           runtimeMetric("sum", entry.second->customStats, kPreloadSplits);
       metrics_->get(Metrics::kNumWrittenFiles)[metricIndex] =
@@ -509,17 +518,23 @@ std::unordered_map<std::string, std::string> WholeStageResultIterator::getQueryC
     configs[velox::core::QueryConfig::kMaxSpillBytes] =
         std::to_string(veloxCfg_->get<uint64_t>(kMaxSpillBytes, 107374182400LL));
     configs[velox::core::QueryConfig::kSpillWriteBufferSize] =
-        std::to_string(veloxCfg_->get<uint64_t>(kSpillWriteBufferSize, 4L * 1024 * 1024));
+        std::to_string(veloxCfg_->get<uint64_t>(kShuffleSpillDiskWriteBufferSize, 1L * 1024 * 1024));
+    configs[velox::core::QueryConfig::kSpillReadBufferSize] =
+        std::to_string(veloxCfg_->get<int32_t>(kSpillReadBufferSize, 1L * 1024 * 1024));
     configs[velox::core::QueryConfig::kSpillStartPartitionBit] =
         std::to_string(veloxCfg_->get<uint8_t>(kSpillStartPartitionBit, 29));
     configs[velox::core::QueryConfig::kSpillNumPartitionBits] =
         std::to_string(veloxCfg_->get<uint8_t>(kSpillPartitionBits, 3));
     configs[velox::core::QueryConfig::kSpillableReservationGrowthPct] =
         std::to_string(veloxCfg_->get<uint8_t>(kSpillableReservationGrowthPct, 25));
-    configs[velox::core::QueryConfig::kSpillCompressionKind] =
-        veloxCfg_->get<std::string>(kSpillCompressionKind, "lz4");
     configs[velox::core::QueryConfig::kSpillPrefixSortEnabled] =
         veloxCfg_->get<std::string>(kSpillPrefixSortEnabled, "false");
+    if (veloxCfg_->get<bool>(kSparkShuffleSpillCompress, true)) {
+      configs[velox::core::QueryConfig::kSpillCompressionKind] =
+          veloxCfg_->get<std::string>(kSpillCompressionKind, veloxCfg_->get<std::string>(kCompressionKind, "lz4"));
+    } else {
+      configs[velox::core::QueryConfig::kSpillCompressionKind] = "none";
+    }
     configs[velox::core::QueryConfig::kSparkBloomFilterExpectedNumItems] =
         std::to_string(veloxCfg_->get<int64_t>(kBloomFilterExpectedNumItems, 1000000));
     configs[velox::core::QueryConfig::kSparkBloomFilterNumBits] =

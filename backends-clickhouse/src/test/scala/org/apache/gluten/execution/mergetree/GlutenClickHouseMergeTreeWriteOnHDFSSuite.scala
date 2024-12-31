@@ -16,7 +16,8 @@
  */
 package org.apache.gluten.execution.mergetree
 
-import org.apache.gluten.backendsapi.clickhouse.CHConf
+import org.apache.gluten.backendsapi.clickhouse.{CHConf, RuntimeConfig, RuntimeSettings}
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution.{FileSourceScanExecTransformer, GlutenClickHouseTPCHAbstractSuite}
 
 import org.apache.spark.SparkConf
@@ -24,6 +25,7 @@ import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.delta.catalog.ClickHouseTableV2
 import org.apache.spark.sql.delta.files.TahoeFileIndex
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.datasources.mergetree.StorageMeta
 import org.apache.spark.sql.execution.datasources.v2.clickhouse.metadata.AddMergeTreeParts
 
 import org.apache.commons.io.FileUtils
@@ -57,7 +59,9 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
       .set("spark.sql.shuffle.partitions", "5")
       .set("spark.sql.autoBroadcastJoinThreshold", "10MB")
       .set("spark.sql.adaptive.enabled", "true")
-      .setCHConfig("logger.level", "error")
+      .set(RuntimeConfig.LOGGER_LEVEL.key, "error")
+      .set(GlutenConfig.NATIVE_WRITER_ENABLED.key, "true")
+      .set(CHConf.ENABLE_ONEPIPELINE_MERGETREE_WRITE.key, spark35.toString)
       .setCHSettings("mergetree.merge_after_insert", false)
   }
 
@@ -125,8 +129,11 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
         val fileIndex = mergetreeScan.relation.location.asInstanceOf[TahoeFileIndex]
         assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).clickhouseTableConfigs.nonEmpty)
         assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).bucketOption.isEmpty)
-        assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).orderByKeyOption.isEmpty)
-        assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).primaryKeyOption.isEmpty)
+        assert(
+          ClickHouseTableV2
+            .getTable(fileIndex.deltaLog)
+            .orderByKey === StorageMeta.DEFAULT_ORDER_BY_KEY)
+        assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).primaryKey.isEmpty)
         assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).partitionColumns.isEmpty)
         val addFiles = fileIndex.matchingFiles(Nil, Nil).map(f => f.asInstanceOf[AddMergeTreeParts])
         assertResult(1)(addFiles.size)
@@ -188,15 +195,11 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
         assertResult("l_shipdate,l_orderkey")(
           ClickHouseTableV2
             .getTable(fileIndex.deltaLog)
-            .orderByKeyOption
-            .get
-            .mkString(","))
+            .orderByKey)
         assertResult("l_shipdate")(
           ClickHouseTableV2
             .getTable(fileIndex.deltaLog)
-            .primaryKeyOption
-            .get
-            .mkString(","))
+            .primaryKey)
         assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).partitionColumns.isEmpty)
         val addFiles = fileIndex.matchingFiles(Nil, Nil).map(f => f.asInstanceOf[AddMergeTreeParts])
         assertResult(1)(addFiles.size)
@@ -336,16 +339,13 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
         assertResult("l_orderkey")(
           ClickHouseTableV2
             .getTable(fileIndex.deltaLog)
-            .orderByKeyOption
-            .get
-            .mkString(","))
+            .orderByKey)
+        val ta = ClickHouseTableV2.getTable(fileIndex.deltaLog)
         assertResult("l_orderkey")(
           ClickHouseTableV2
             .getTable(fileIndex.deltaLog)
-            .primaryKeyOption
-            .get
-            .mkString(","))
-        assertResult(1)(ClickHouseTableV2.getTable(fileIndex.deltaLog).partitionColumns.size)
+            .primaryKey)
+        assertResult(1)(ta.partitionColumns.size)
         assertResult("l_returnflag")(
           ClickHouseTableV2
             .getTable(fileIndex.deltaLog)
@@ -359,7 +359,7 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
     spark.sql("drop table lineitem_mergetree_partition_hdfs")
   }
 
-  test("test mergetree write with bucket table") {
+  testSparkVersionLE33("test mergetree write with bucket table") {
     spark.sql(s"""
                  |DROP TABLE IF EXISTS lineitem_mergetree_bucket_hdfs;
                  |""".stripMargin)
@@ -411,16 +411,17 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
         assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).clickhouseTableConfigs.nonEmpty)
         assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).bucketOption.isDefined)
         if (spark32) {
-          assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).orderByKeyOption.isEmpty)
+          assert(
+            ClickHouseTableV2
+              .getTable(fileIndex.deltaLog)
+              .orderByKey === StorageMeta.DEFAULT_ORDER_BY_KEY)
         } else {
           assertResult("l_partkey")(
             ClickHouseTableV2
               .getTable(fileIndex.deltaLog)
-              .orderByKeyOption
-              .get
-              .mkString(","))
+              .orderByKey)
         }
-        assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).primaryKeyOption.isEmpty)
+        assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).primaryKey.isEmpty)
         assertResult(1)(ClickHouseTableV2.getTable(fileIndex.deltaLog).partitionColumns.size)
         assertResult("l_returnflag")(
           ClickHouseTableV2
@@ -435,7 +436,7 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
     spark.sql("drop table lineitem_mergetree_bucket_hdfs")
   }
 
-  test("test mergetree write with the path based") {
+  testSparkVersionLE33("test mergetree write with the path based bucket table") {
     val dataPath = s"$HDFS_URL/test/lineitem_mergetree_bucket_hdfs"
 
     val sourceDF = spark.sql(s"""
@@ -469,10 +470,8 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
         assertResult("l_orderkey")(
           ClickHouseTableV2
             .getTable(fileIndex.deltaLog)
-            .orderByKeyOption
-            .get
-            .mkString(","))
-        assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).primaryKeyOption.nonEmpty)
+            .orderByKey)
+        assert(ClickHouseTableV2.getTable(fileIndex.deltaLog).primaryKey.nonEmpty)
         assertResult(1)(ClickHouseTableV2.getTable(fileIndex.deltaLog).partitionColumns.size)
         assertResult("l_returnflag")(
           ClickHouseTableV2
@@ -500,7 +499,7 @@ class GlutenClickHouseMergeTreeWriteOnHDFSSuite
       "spark.databricks.delta.optimize.minFileSize" -> "200000000",
       CHConf.runtimeSettings("mergetree.merge_after_insert") -> "true",
       CHConf.runtimeSettings("mergetree.insert_without_local_storage") -> "true",
-      CHConf.runtimeSettings("min_insert_block_size_rows") -> "10000"
+      RuntimeSettings.MIN_INSERT_BLOCK_SIZE_ROWS.key -> "10000"
     ) {
       spark.sql(s"""
                    |DROP TABLE IF EXISTS $tableName;

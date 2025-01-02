@@ -21,17 +21,21 @@ import org.apache.gluten.substrait.type.TypeNode;
 import io.substrait.proto.Expression;
 import io.substrait.proto.FunctionArgument;
 import io.substrait.proto.FunctionOption;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class ScalarFunctionNode implements ExpressionNode, Serializable {
+  private static final Logger LOG = LoggerFactory.getLogger(ScalarFunctionNode.class);
   private final Long functionId;
   private final List<ExpressionNode> expressionNodes = new ArrayList<>();
   private final TypeNode typeNode;
-  private Map<String, List<String>> functionOptions;
+  private Map<String, List<String>> functionOptions = new HashMap<>();
 
   ScalarFunctionNode(
       Long functionId,
@@ -59,11 +63,12 @@ public class ScalarFunctionNode implements ExpressionNode, Serializable {
     }
     for (String optionKey : functionOptions.keySet()) {
       List<String> optionValues = functionOptions.get(optionKey);
+      LOG.info("optionKey:{}, optionValues:{}", optionKey, optionValues);
       FunctionOption.Builder functionOptionBuilder = FunctionOption.newBuilder();
       functionOptionBuilder.setName(optionKey);
       for (int i = 0; i < optionValues.size(); ++i) {
         String optionValue = optionValues.get(i);
-        functionOptionBuilder.setPreference(i, optionValue);
+        functionOptionBuilder.addPreference(optionValue);
       }
       scalarBuilder.addOptions(functionOptionBuilder);
     }

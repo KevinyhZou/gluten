@@ -462,7 +462,7 @@ public:
 
     static size_t getNumberOfIndexArguments(const DB::ColumnsWithTypeAndName & arguments) { return arguments.size() - 1; }
 
-    bool insertResultToColumn(DB::IColumn & dest, const Element & root, DB::GeneratorJSONPath<JSONParser> & generator_json_path, bool)
+    bool insertResultToColumn(DB::IColumn & dest, Element & root, DB::GeneratorJSONPath<JSONParser> & generator_json_path, bool nested_get_json_object_rewrited)
     {
         Element current_element = root;
         DB::VisitorStatus status;
@@ -506,6 +506,10 @@ public:
             else
             {
                 serializer.addElement(elements[0]);
+            }
+            if (nested_get_json_object_rewrited)
+            {
+                root = elements[0];
             }
         }
         else
@@ -606,6 +610,11 @@ public:
                 DB::ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "The second argument of function {} must be a non-constant column", getName());
         }
 
+        if (const auto * paths_col = typeid_cast<const DB::ColumnConst *>(arguments[2].column.get()))
+        {
+            nested_get_json_object_paths = paths_col->getDataAt(0).toString();
+        }
+
         Poco::StringTokenizer tokenizer(json_fields, "|");
         std::vector<String> names;
         DB::DataTypes types;
@@ -643,6 +652,7 @@ private:
     mutable bool is_most_normal_json_text = true;
     mutable size_t total_parsed_rows = 0;
     mutable size_t total_normalized_rows = 0;
+    mutable String nested_get_json_object_paths = "";
 
     template <typename JSONParser>
     bool safeParseJson(std::string_view str, JSONParser & parser, JSONParser::Element & doc) const
@@ -687,7 +697,7 @@ private:
         const auto & first_column = arguments[0];
         if (const auto * required_fields_col = typeid_cast<const DB::ColumnConst *>(arguments[1].column.get()))
         {
-            std::string json_fields = required_fields_col->getDataAt(0).toString();
+            std::string json_fields = nested_get_json_object_paths.size() > 0 ? nested_get_json_object_paths : required_fields_col->getDataAt(0).toString();
             Poco::StringTokenizer tokenizer(json_fields, "|");
             bool path_parsed = true;
             for (const auto & field : tokenizer)
@@ -776,9 +786,20 @@ private:
                 for (size_t j = 0; j < tuple_size; ++j)
                 {
                     generator_json_paths[j]->reinitialize();
-                    if (!impl.insertResultToColumn(*tuple_columns[j], document, *generator_json_paths[j], true))
+                    if (!impl.insertResultToColumn(*tuple_columns[j], document, *generator_json_paths[j], nested_get_json_object_paths.size() > 0))
                     {
-                        tuple_columns[j]->insertDefault();
+                       bool res = false;
+                       if (nested_get_json_object_paths.size() > 0 && j > 0)
+                       {
+                           size_t last_data_index = tuple_columns[j - 1]->size() - 1;
+                           const StringRef last_data = tuple_columns[j-1]->getDataAt(last_data_index);
+                           Element t;
+                           res = safeParseJson(last_data.toString(), parser, t);
+                           generator_json_paths[j]->reinitialize();
+                           res = impl.insertResultToColumn(*tuple_columns[j], t, *generator_json_paths[j], true);
+                       }
+                       if (!res)
+                           tuple_columns[j]->insertDefault();
                     }
                 }
             }
@@ -791,7 +812,15 @@ private:
             }
         }
 
-        return DB::ColumnTuple::create(std::move(tuple_columns));
+        if (nested_get_json_object_paths.size() > 0 && tuple_columns.size() > 0)
+        {
+            DB::Columns final_cols;
+            size_t tuple_columns_size = tuple_columns.size();
+            final_cols.emplace_back(std::move(tuple_columns[tuple_columns_size - 1]));
+            return DB::ColumnTuple::create(std::move(final_cols));
+        }
+        else
+            return DB::ColumnTuple::create(std::move(tuple_columns));
     }
 };
 

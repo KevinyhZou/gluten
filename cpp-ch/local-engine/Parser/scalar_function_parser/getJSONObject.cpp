@@ -63,6 +63,23 @@ protected:
         {
             throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Function {} requires 2 arguments", getCHFunctionName(substrait_func));
         }
+        bool nested_get_json_object_rewrited = false;
+        String nested_get_json_object_paths = "";
+        const auto & options = substrait_func.options();
+        for (const auto & option : options)
+        {
+            if (option.name() == "getJsonObjectRewrite" && option.preference()[0] == "true")
+                nested_get_json_object_rewrited = true;
+            if (option.name() == "getJsonObjectOriginalPaths")
+            {
+                for (size_t i = 0; i < option.preference().size(); ++i)
+                {
+                    nested_get_json_object_paths += option.preference()[i];
+                    if (i != option.preference().size() - 1)
+                        nested_get_json_object_paths += "|";
+                }
+            }
+        }
         if (args[0].value().has_scalar_function()
             && args[0].value().scalar_function().function_reference() == SelfDefinedFunctionReference::GET_JSON_OBJECT)
         {
@@ -73,7 +90,8 @@ protected:
                 const auto flatten_function_pb = args[0].value().scalar_function();
                 const auto * flatten_arg0 = parseExpression(actions_dag, flatten_function_pb.arguments(0).value());
                 const auto * flatten_arg1 = parseExpression(actions_dag, flatten_function_pb.arguments(1).value());
-                flatten_json_column_node = toFunctionNode(actions_dag, FlattenJSONStringOnRequiredFunction::name, flatten_json_column_name, {flatten_arg0, flatten_arg1});
+                const auto * flatten_path_arg = addColumnToActionsDAG(actions_dag, std::make_shared<DB::DataTypeString>(), nested_get_json_object_paths);
+                flatten_json_column_node = toFunctionNode(actions_dag, FlattenJSONStringOnRequiredFunction::name, flatten_json_column_name, {flatten_arg0, flatten_arg1, flatten_path_arg});
                 actions_dag.addOrReplaceInOutputs(*flatten_json_column_node);
             }
             return {flatten_json_column_node, parseExpression(actions_dag, args[1].value())};

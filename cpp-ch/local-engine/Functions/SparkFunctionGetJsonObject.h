@@ -462,30 +462,67 @@ public:
 
     static size_t getNumberOfIndexArguments(const DB::ColumnsWithTypeAndName & arguments) { return arguments.size() - 1; }
 
-    bool insertResultToColumn(DB::IColumn & dest, Element & root, DB::GeneratorJSONPath<JSONParser> & generator_json_path, bool nested_get_json_object_rewrited)
+    bool insertResultToColumn(DB::IColumn & dest, Element & root, std::vector<std::shared_ptr<DB::GeneratorJSONPath<JSONParser>>> & generator_json_paths, size_t & json_path_pos)
     {
-        Element current_element;
         DB::VisitorStatus status = DB::VisitorStatus::Ok;
+        bool success = false;
+        for (size_t i = json_path_pos; i < generator_json_paths.size(); ++i)
+        {
+            std::shared_ptr<DB::GeneratorJSONPath<JSONParser>> generator_json_path = generator_json_paths[i];
+            generator_json_path->reinitialize();
+            status = DB::VisitorStatus::Ok;
+            while (status != DB::VisitorStatus::Exhausted)
+            {
+                status = generator_json_path->getNextItem(root);
+                if (status == DB::VisitorStatus::Ok)
+                {
+                    success = true;
+                }
+                else if (status == DB::VisitorStatus::Error)
+                {
+                    success = false;
+                }
+            }
+            json_path_pos = i;
+            if (!success)
+            {
+                break;
+            }
+        }
+        if (!success)
+        {
+            return false;
+        }
+        DB::ColumnNullable & nullable_col_str = assert_cast<DB::ColumnNullable &>(dest);
+        DB::ColumnString * col_str = assert_cast<DB::ColumnString *>(&nullable_col_str.getNestedColumn());
+        JSONStringSerializer serializer(*col_str);
+        nullable_col_str.getNullMapData().push_back(0);
+        if (root.isString())
+        {
+            serializer.addRawString(root.getString());
+        }
+        else
+        {
+            serializer.addElement(root);
+        }
+        serializer.commit();
+        return true;
+    }
+
+    bool insertResultToColumn(DB::IColumn & dest, Element & root, DB::GeneratorJSONPath<JSONParser> & generator_json_path, bool)
+    {
+        Element current_element = root;
+        DB::VisitorStatus status;
         std::stringstream out; // STYLE_CHECK_ALLOW_STD_STRING_STREAM
         /// Create json array of results: [res1, res2, ...]
         bool success = false;
         std::vector<Element> elements;
-        while (status != DB::VisitorStatus::Exhausted)
+        while ((status = generator_json_path.getNextItem(current_element)) != DB::VisitorStatus::Exhausted)
         {
-            if (nested_get_json_object_rewrited)
-            {
-                status = generator_json_path.getNextItem(root);
-            }
-            else
-            {
-                current_element = root;
-                status = generator_json_path.getNextItem(current_element);
-                if (status == DB::VisitorStatus::Ok && !nested_get_json_object_rewrited)
-                    elements.push_back(current_element);
-            }
             if (status == DB::VisitorStatus::Ok)
             {
                 success = true;
+                elements.push_back(current_element);
             }
             else if (status == DB::VisitorStatus::Error)
             {
@@ -493,14 +530,11 @@ public:
                 /// Here it is possible to handle errors with ON ERROR (as described in ISO/IEC TR 19075-6),
                 ///  however this functionality is not implemented yet
             }
+            current_element = root;
         }
         if (!success)
         {
             return false;
-        }
-        else if (nested_get_json_object_rewrited)
-        {
-            return true;
         }
         DB::ColumnNullable & nullable_col_str = assert_cast<DB::ColumnNullable &>(dest);
         DB::ColumnString * col_str = assert_cast<DB::ColumnString *>(&nullable_col_str.getNestedColumn());
@@ -783,6 +817,8 @@ private:
             std::back_inserter(generator_json_paths),
             [](const auto & ast) { return std::make_shared<DB::GeneratorJSONPath<JSONParser>>(ast); });
 
+        
+        bool get_result_by_nested_rewrite = nested_get_json_object_paths.size() > 0;
         for (const auto i : collections::range(0, arguments[0].column->size()))
         {
             if (!col_json_const)
@@ -792,23 +828,36 @@ private:
             }
             if (document_ok)
             {
-                for (size_t j = 0; j < tuple_size; ++j)
+                if (get_result_by_nested_rewrite)
                 {
-                    generator_json_paths[j]->reinitialize();
-                    if (!impl.insertResultToColumn(*tuple_columns[j], document, *generator_json_paths[j], nested_get_json_object_paths.size() > 0 && j != tuple_size - 1))
+                    size_t json_path_pos = 0;
+                    if (!impl.insertResultToColumn(*tuple_columns[tuple_size-1], document, generator_json_paths, json_path_pos))
                     {
-                       bool res = false;
-                       if (nested_get_json_object_paths.size() > 0 && j > 0)
-                       {
-                           size_t last_data_index = tuple_columns[j - 1]->size() - 1;
-                           const StringRef last_data = tuple_columns[j-1]->getDataAt(last_data_index);
-                           Element t;
-                           res = safeParseJson(last_data.toString(), parser, t);
-                           generator_json_paths[j]->reinitialize();
-                           res = impl.insertResultToColumn(*tuple_columns[j], t, *generator_json_paths[j], true);
-                       }
-                       if (!res)
-                           tuple_columns[j]->insertDefault();
+                        if (document.isString())
+                        {
+                            std::cout << "json_path_pos:" << json_path_pos << std::endl;
+                            Element t;
+                            bool parsed = safeParseJson(document.getString(), parser, t);
+                            if (!parsed)
+                                tuple_columns[tuple_size-1]->insertDefault();
+                            else if(!impl.insertResultToColumn(*tuple_columns[tuple_size-1], t, generator_json_paths, json_path_pos))
+                            {
+                                tuple_columns[tuple_size-1]->insertDefault();
+                            }
+                        }
+                        else
+                            tuple_columns[tuple_size-1]->insertDefault();
+                    }
+                }
+                else
+                {
+                    for (size_t j = 0; j < tuple_size; ++j)
+                    {
+                        generator_json_paths[j]->reinitialize();
+                        if (!impl.insertResultToColumn(*tuple_columns[j], document, *generator_json_paths[j], nested_get_json_object_paths.size() > 0))
+                        {
+                            tuple_columns[j]->insertDefault();
+                        }
                     }
                 }
             }
@@ -821,11 +870,10 @@ private:
             }
         }
 
-        if (nested_get_json_object_paths.size() > 0 && tuple_columns.size() > 0)
+        if (nested_get_json_object_paths.size() > 0)
         {
             DB::Columns final_cols;
-            size_t tuple_columns_size = tuple_columns.size();
-            final_cols.emplace_back(std::move(tuple_columns[tuple_columns_size - 1]));
+            final_cols.emplace_back(std::move(tuple_columns[tuple_size - 1]));
             return DB::ColumnTuple::create(std::move(final_cols));
         }
         else

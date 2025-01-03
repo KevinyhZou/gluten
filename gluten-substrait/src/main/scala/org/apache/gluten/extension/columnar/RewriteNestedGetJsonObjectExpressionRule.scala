@@ -75,7 +75,7 @@ class RewriteNestedGetJsonObjectExpressionRule(spark: SparkSession) extends Rule
       case g: GetJsonObject =>
         var paths = originalPaths
         val gPath = getPathLiteral(g.path).orNull
-        paths :+= gPath
+        paths +:= gPath
         var newPath = ""
         if (gPath != null) {
           newPath = gPath.replace("$", "") + path

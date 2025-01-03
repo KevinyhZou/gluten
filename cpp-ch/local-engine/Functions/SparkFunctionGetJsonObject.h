@@ -464,18 +464,28 @@ public:
 
     bool insertResultToColumn(DB::IColumn & dest, Element & root, DB::GeneratorJSONPath<JSONParser> & generator_json_path, bool nested_get_json_object_rewrited)
     {
-        Element current_element = root;
-        DB::VisitorStatus status;
+        Element current_element;
+        DB::VisitorStatus status = DB::VisitorStatus::Ok;
         std::stringstream out; // STYLE_CHECK_ALLOW_STD_STRING_STREAM
         /// Create json array of results: [res1, res2, ...]
         bool success = false;
         std::vector<Element> elements;
-        while ((status = generator_json_path.getNextItem(current_element)) != DB::VisitorStatus::Exhausted)
+        while (status != DB::VisitorStatus::Exhausted)
         {
+            if (nested_get_json_object_rewrited)
+            {
+                status = generator_json_path.getNextItem(root);
+            }
+            else
+            {
+                current_element = root;
+                status = generator_json_path.getNextItem(current_element);
+                if (status == DB::VisitorStatus::Ok && !nested_get_json_object_rewrited)
+                    elements.push_back(current_element);
+            }
             if (status == DB::VisitorStatus::Ok)
             {
                 success = true;
-                elements.push_back(current_element);
             }
             else if (status == DB::VisitorStatus::Error)
             {
@@ -483,11 +493,14 @@ public:
                 /// Here it is possible to handle errors with ON ERROR (as described in ISO/IEC TR 19075-6),
                 ///  however this functionality is not implemented yet
             }
-            current_element = root;
         }
         if (!success)
         {
             return false;
+        }
+        else if (nested_get_json_object_rewrited)
+        {
+            return true;
         }
         DB::ColumnNullable & nullable_col_str = assert_cast<DB::ColumnNullable &>(dest);
         DB::ColumnString * col_str = assert_cast<DB::ColumnString *>(&nullable_col_str.getNestedColumn());
@@ -506,10 +519,6 @@ public:
             else
             {
                 serializer.addElement(elements[0]);
-            }
-            if (nested_get_json_object_rewrited)
-            {
-                root = elements[0];
             }
         }
         else
@@ -786,7 +795,7 @@ private:
                 for (size_t j = 0; j < tuple_size; ++j)
                 {
                     generator_json_paths[j]->reinitialize();
-                    if (!impl.insertResultToColumn(*tuple_columns[j], document, *generator_json_paths[j], nested_get_json_object_paths.size() > 0))
+                    if (!impl.insertResultToColumn(*tuple_columns[j], document, *generator_json_paths[j], nested_get_json_object_paths.size() > 0 && j != tuple_size - 1))
                     {
                        bool res = false;
                        if (nested_get_json_object_paths.size() > 0 && j > 0)

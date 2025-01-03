@@ -593,7 +593,7 @@ public:
     explicit FlattenJSONStringOnRequiredFunction(DB::ContextPtr context_) : context(context_) { }
     ~FlattenJSONStringOnRequiredFunction() override = default;
     String getName() const override { return name; }
-    size_t getNumberOfArguments() const override { return 2; }
+    size_t getNumberOfArguments() const override { return 3; }
     bool isVariadic() const override { return false; }
     bool isSuitableForShortCircuitArgumentsExecution(const DB::DataTypesWithConstInfo & /*arguments*/) const override { return false; }
 

@@ -160,9 +160,6 @@ object ExpressionConverter extends SQLConfHelper with Logging {
     expr match {
       case p: PythonUDF =>
         return replacePythonUDFWithExpressionTransformer(p, attributeSeq, expressionsMap)
-      case s: ScalaUDF
-          if BackendsApiManager.getSparkPlanExecApiInstance.collapsedExpressionSupported(s) =>
-        return replaceCollapsedExpressionWithExpressionTransformer(s, attributeSeq, expressionsMap)
       case s: ScalaUDF =>
         return replaceScalaUDFWithExpressionTransformer(s, attributeSeq, expressionsMap)
       case _ if HiveUDFTransformer.isHiveUDF(expr) =>
@@ -747,6 +744,15 @@ object ExpressionConverter extends SQLConfHelper with Logging {
           replaceWithExpressionTransformer0(ss.regex, attributeSeq, expressionsMap),
           replaceWithExpressionTransformer0(ss.limit, attributeSeq, expressionsMap),
           ss
+        )
+      case expr
+          if BackendsApiManager.getSparkPlanExecApiInstance.expressionCollapseSupported(
+            ExpressionMappings.expressionsMap.getOrElse(expr.getClass, "")) =>
+        logInfo("expr.class:" + expr.getClass.getName)
+        BackendsApiManager.getSparkPlanExecApiInstance.genCollapseNestedExpressionsTransformer(
+          substraitExprName,
+          expr.children.map(replaceWithExpressionTransformer0(_, attributeSeq, expressionsMap)),
+          expr
         )
       case expr =>
         GenericExpressionTransformer(

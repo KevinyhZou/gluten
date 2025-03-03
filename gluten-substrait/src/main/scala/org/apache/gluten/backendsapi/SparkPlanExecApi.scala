@@ -703,5 +703,10 @@ trait SparkPlanExecApi {
       outputAttributes: Seq[Attribute],
       child: Seq[SparkPlan]): ColumnarRangeBaseExec
 
-  def collapsedExpressionSupported(expr: ScalaUDF): Boolean = false
+  def genCollapseNestedExpressionsTransformer(
+      substraitExprName: String,
+      children: Seq[ExpressionTransformer],
+      original: Expression): ExpressionTransformer
+
+  def expressionCollapseSupported(exprName: String): Boolean = false
 }

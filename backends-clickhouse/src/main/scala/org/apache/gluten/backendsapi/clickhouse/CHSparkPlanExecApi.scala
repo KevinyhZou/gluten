@@ -942,7 +942,13 @@ class CHSparkPlanExecApi extends SparkPlanExecApi with Logging {
       child: Seq[SparkPlan]): ColumnarRangeBaseExec =
     CHRangeExecTransformer(start, end, step, numSlices, numElements, outputAttributes, child)
 
-  override def collapsedExpressionSupported(expr: ScalaUDF): Boolean =
-    CollapsedExpressionMappings.supported(expr.udfName.getOrElse(""))
+  override def genCollapseNestedExpressionsTransformer(
+      substraitExprName: String,
+      children: Seq[ExpressionTransformer],
+      original: Expression): ExpressionTransformer =
+    CHCollapseNestedExpressionsTransformer(substraitExprName, children, original)
+
+  override def expressionCollapseSupported(exprName: String): Boolean =
+    CollapsedExpressionMappings.supported(exprName)
 
 }

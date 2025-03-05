@@ -72,6 +72,7 @@ object CHRuleApi {
     injector.injectOptimizerRule(spark => CHAggregateFunctionRewriteRule(spark))
     injector.injectOptimizerRule(_ => CountDistinctWithoutExpand)
     injector.injectOptimizerRule(_ => EqualToRewrite)
+    injector.injectOptimizerRule(spark => new ConvertGetJsonObjectsHaveCommonExpr(spark))
     injector.injectPreCBORule(spark => new CHOptimizeMetadataOnlyDeltaQuery(spark))
   }
 

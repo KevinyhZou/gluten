@@ -27,13 +27,12 @@ case class CHCollapsedExpression(
     dataType: DataType,
     children: Seq[Expression],
     name: String,
-    nullable: Boolean = true,
-    original: Expression)
+    nullable: Boolean = true)
   extends Expression {
 
   override def toString: String = s"$name(${children.mkString(", ")})"
 
-  override def eval(input: InternalRow): Any = original.eval(input)
+  override def eval(input: InternalRow): Any = null
 
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = null
 

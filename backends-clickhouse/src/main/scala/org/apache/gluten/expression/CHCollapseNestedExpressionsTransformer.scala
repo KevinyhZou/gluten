@@ -17,8 +17,7 @@
 package org.apache.gluten.expression
 
 import org.apache.gluten.config.GlutenConfig
-import org.apache.gluten.substrait.expression.{ExpressionNode, ScalarFunctionNode}
-import org.apache.gluten.substrait.expression.ExpressionBuilder
+import org.apache.gluten.substrait.expression.{ExpressionBuilder, ExpressionNode}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions._
@@ -26,6 +25,10 @@ import org.apache.spark.sql.types.DataType
 
 import java.util
 
+/**
+ * Collapse nested expressions for optimization, to reduce expression calls. Now support `and`,
+ * `or`. e.g. select ... and(and(a=1, b=2), c=3) => select ... and(a=1, b=2, c=3).
+ */
 case class CHCollapseNestedExpressionsTransformer(
     substraitExprName: String,
     children: Seq[ExpressionTransformer],
@@ -34,13 +37,14 @@ case class CHCollapseNestedExpressionsTransformer(
   with Logging {
 
   override def doTransform(args: Object): ExpressionNode = {
+    val exprNode = super.doTransform(args)
     if (canBeOptimized(original)) {
       val functionMap = args.asInstanceOf[util.HashMap[String, java.lang.Long]]
-      val newExprNode = doTransform(original, functionMap)
+      val newExprNode = doTransform(original, children, functionMap)
       logDebug("The new expression node: " + newExprNode.toProtobuf)
       newExprNode
     } else {
-      super.doTransform(args)
+      exprNode
     }
   }
 
@@ -68,52 +72,69 @@ case class CHCollapseNestedExpressionsTransformer(
     }
   }
 
-  def doTransform(
+  private def doTransform0(
       expr: Expression,
+      dataType: DataType,
+      childNodes: Seq[ExpressionNode],
+      childTypes: Seq[DataType],
+      functionMap: util.Map[String, java.lang.Long]): ExpressionNode = {
+    val funcName: String = ConverterUtils.makeFuncName(substraitExprName, childTypes)
+    val functionId = ExpressionBuilder.newScalarFunction(functionMap, funcName)
+    val childNodeList = new util.ArrayList[ExpressionNode]()
+    childNodes.foreach(c => childNodeList.add(c))
+    val typeNode = ConverterUtils.getTypeNode(dataType, expr.nullable)
+    ExpressionBuilder.makeScalarFunction(functionId, childNodeList, typeNode)
+  }
+
+  private def doTransform(
+      expr: Expression,
+      transformers: Seq[ExpressionTransformer],
       functionMap: util.Map[String, java.lang.Long]): ExpressionNode = {
 
-    var name = Option.empty[String]
     var dataType = null.asInstanceOf[DataType]
-    var children = Seq.empty[Expression]
+    var children = Seq.empty[ExpressionNode]
+    var childTypes = Seq.empty[DataType]
 
-    def f(e: Expression, parent: Option[Expression] = Option.empty): Unit = {
+    def f(
+        e: Expression,
+        ts: ExpressionTransformer = null,
+        parent: Option[Expression] = Option.empty): Unit = {
       parent match {
         case None =>
-          name = getExpressionName(e)
           dataType = e.dataType
           e match {
             case a: And if canBeOptimized(a) =>
-              f(a.left, Option.apply(a))
-              f(a.right, Option.apply(a))
+              f(a.left, transformers.head, Option.apply(a))
+              f(a.right, transformers(1), Option.apply(a))
             case o: Or if canBeOptimized(o) =>
-              f(o.left, Option.apply(o))
-              f(o.right, Option.apply(o))
+              f(o.left, transformers.head, Option.apply(o))
+              f(o.right, transformers(1), Option.apply(o))
             case _ =>
           }
         case Some(_: And) =>
           e match {
             case a: And if canBeOptimized(a) =>
-              f(a.left, Option.apply(a))
-              f(a.right, Option.apply(a))
+              val childTransformers = ts.children
+              f(a.left, childTransformers.head, Option.apply(a))
+              f(a.right, childTransformers(1), Option.apply(a))
             case _ =>
-              children +:= e
+              children +:= ts.doTransform(functionMap)
+              childTypes +:= e.dataType
           }
         case Some(_: Or) =>
           e match {
             case o: Or if canBeOptimized(o) =>
-              f(o.left, Option.apply(o))
-              f(o.right, Option.apply(o))
+              val childTransformers = ts.children
+              f(o.left, childTransformers.head, Option.apply(o))
+              f(o.right, childTransformers(1), Option.apply(o))
             case _ =>
-              children +:= e
+              children +:= ts.doTransform(functionMap)
+              childTypes +:= e.dataType
           }
+        case _ =>
       }
     }
     f(expr)
-    val funcName: String = ConverterUtils.makeFuncName(substraitExprName, children.map(_.dataType))
-    val functionId = ExpressionBuilder.newScalarFunction(functionMap, funcName)
-    val childNodes = new util.ArrayList[ExpressionNode]()
-    children.map(c => doTransform(c, functionMap)).foreach(c => childNodes.add(c))
-    val typeNode = ConverterUtils.getTypeNode(dataType, expr.nullable)
-    ExpressionBuilder.makeScalarFunction(functionId, childNodes, typeNode)
+    doTransform0(expr, dataType, children, childTypes, functionMap)
   }
 }

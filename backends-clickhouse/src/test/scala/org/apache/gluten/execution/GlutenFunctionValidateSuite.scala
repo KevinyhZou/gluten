@@ -380,31 +380,18 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
   }
 
   test("GLUTEN-8557: Optimize nested and/or") {
-    def checkCollapsedFunctions(plan: SparkPlan, functionName: String, argNum: Int): Boolean = {
 
-      def checkExpression(expr: Expression, functionName: String, argNum: Int): Boolean =
-        expr match {
-          case s: ScalaUDF
-              if s.udfName.getOrElse("").equals(functionName) && s.children.size == argNum =>
-            true
-          case _ => expr.children.exists(c => checkExpression(c, functionName, argNum))
-        }
-      plan match {
-        case f: FilterExecTransformer => return checkExpression(f.condition, functionName, argNum)
-        case _ => return plan.children.exists(c => checkCollapsedFunctions(c, functionName, argNum))
-      }
-      false
-    }
     runQueryAndCompare(
       "SELECT count(1) from json_test where int_field1 = 5 and double_field1 > 1.0" +
-        " and string_field1 is not null") {
-      x => assert(checkCollapsedFunctions(x.queryExecution.executedPlan, "and", 5))
-    }
+        " and string_field1 is not null") { _ => }
+
     runQueryAndCompare(
       "SELECT count(1) from json_test where int_field1 = 5 or double_field1 > 1.0" +
-        " or string_field1 is not null") {
-      x => assert(checkCollapsedFunctions(x.queryExecution.executedPlan, "or", 3))
-    }
+        " or string_field1 is not null") { _ => }
+
+    runQueryAndCompare(
+      "SELECT count(1) from json_test where int_field1 = 5 and double_field1 > 1.0" +
+        " or double_field1 < 100 or string_field1 is not null") { _ => }
   }
 
   test("Test covar_samp") {

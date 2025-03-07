@@ -109,24 +109,6 @@ object ExpressionConverter extends SQLConfHelper with Logging {
     }
   }
 
-  private def replaceCollapsedExpressionWithExpressionTransformer(
-      udf: ScalaUDF,
-      attributeSeq: Seq[Attribute],
-      expressionsMap: Map[Class[_], String]): ExpressionTransformer = {
-    if (udf.udfName.isEmpty) {
-      throw new GlutenNotSupportException("UDF name is not found!")
-    }
-    udf.udfName match {
-      case Some(name) if CollapsedExpressionMappings.supported(name) =>
-        GenericExpressionTransformer(
-          name,
-          udf.children.map(replaceWithExpressionTransformer0(_, attributeSeq, expressionsMap)),
-          udf)
-      case _ =>
-        throw new GlutenNotSupportException(s"Not supported scala udf: $udf.")
-    }
-  }
-
   private def genRescaleDecimalTransformer(
       substraitName: String,
       b: BinaryArithmetic,

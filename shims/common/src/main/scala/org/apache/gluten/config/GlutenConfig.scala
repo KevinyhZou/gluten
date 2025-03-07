@@ -47,6 +47,8 @@ class GlutenConfig(conf: SQLConf) extends Logging {
 
   def enableGluten: Boolean = getConf(GLUTEN_ENABLED)
 
+  def glutenUiEnabled: Boolean = getConf(GLUTEN_UI_ENABLED)
+
   // FIXME the option currently controls both JVM and native validation against a Substrait plan.
   def enableNativeValidation: Boolean = getConf(NATIVE_VALIDATION_ENABLED)
 
@@ -304,6 +306,8 @@ class GlutenConfig(conf: SQLConf) extends Logging {
 
   def printStackOnValidationFailure: Boolean =
     getConf(VALIDATION_PRINT_FAILURE_STACK_)
+
+  def validationFailFast: Boolean = getConf(VALIDATION_FAIL_FAST)
 
   def enableFallbackReport: Boolean = getConf(FALLBACK_REPORTER_ENABLED)
 
@@ -1319,6 +1323,12 @@ object GlutenConfig {
       .booleanConf
       .createWithDefault(false)
 
+  val VALIDATION_FAIL_FAST =
+    buildConf("spark.gluten.sql.validation.failFast")
+      .internal()
+      .booleanConf
+      .createWithDefault(true)
+
   val SOFT_AFFINITY_LOG_LEVEL =
     buildConf("spark.gluten.soft-affinity.logLevel")
       .internal()
@@ -1572,8 +1582,7 @@ object GlutenConfig {
   val INJECT_NATIVE_PLAN_STRING_TO_EXPLAIN =
     buildConf("spark.gluten.sql.injectNativePlanStringToExplain")
       .internal()
-      .doc("When true, Gluten will inject native plan tree to explain string inside " +
-        "`WholeStageTransformerContext`.")
+      .doc("When true, Gluten will inject native plan tree to Spark's explain output.")
       .booleanConf
       .createWithDefault(false)
 
@@ -1662,7 +1671,7 @@ object GlutenConfig {
       .createWithDefault(false)
 
   val AUTO_ADJUST_STAGE_RESOURCE_PROFILE_ENABLED =
-    buildStaticConf("spark.gluten.auto.adjustStageResource.enabled")
+    buildConf("spark.gluten.auto.adjustStageResource.enabled")
       .internal()
       .doc("Experimental: If enabled, gluten will try to set the stage resource according " +
         "to stage execution plan. Only worked when aqe is enabled at the same time!!")

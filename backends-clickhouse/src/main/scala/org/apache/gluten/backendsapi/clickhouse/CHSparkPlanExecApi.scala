@@ -949,6 +949,6 @@ class CHSparkPlanExecApi extends SparkPlanExecApi with Logging {
     CHCollapseNestedExpressionsTransformer(substraitExprName, children, original)
 
   override def expressionCollapseSupported(exprName: String): Boolean =
-    CollapsedExpressionMappings.supported(exprName)
+    GlutenConfig.get.getSupportedCollapsedExpressions.split(",").exists(c => exprName.equals(c))
 
 }

@@ -121,6 +121,8 @@ class GlutenConfig(conf: SQLConf) extends Logging {
   def scanFileSchemeValidationEnabled: Boolean =
     getConf(VELOX_SCAN_FILE_SCHEME_VALIDATION_ENABLED)
 
+  def getSupportedCollapsedExpressions: String = getConf(GLUTEN_SUPPORTED_COLLAPSED_FUNCTIONS)
+
   // Whether to use GlutenShuffleManager (experimental).
   def isUseGlutenShuffleManager: Boolean =
     conf

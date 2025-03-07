@@ -109,6 +109,7 @@ case class CollapseNestedExpressions(spark: SparkSession) extends Rule[SparkPlan
     var name = getExpressionName(expr)
     var children = Seq.empty[Expression]
     var dataType = null.asInstanceOf[DataType]
+    var nestedFunctions = 0
 
     def f(e: Expression, parent: Option[Expression] = Option.empty[Expression]): Unit = {
       parent match {
@@ -123,6 +124,7 @@ case class CollapseNestedExpressions(spark: SparkSession) extends Rule[SparkPlan
             case Some(_: And) | None =>
               f(a.left, Option.apply(a))
               f(a.right, Option.apply(a))
+              nestedFunctions += 1
             case _ =>
               children +:= optimize(a)
           }
@@ -131,6 +133,7 @@ case class CollapseNestedExpressions(spark: SparkSession) extends Rule[SparkPlan
             case Some(_: Or) | None =>
               f(o.left, parent = Option.apply(o))
               f(o.right, parent = Option.apply(o))
+              nestedFunctions += 1
             case _ =>
               children +:= optimize(o)
           }
@@ -139,13 +142,14 @@ case class CollapseNestedExpressions(spark: SparkSession) extends Rule[SparkPlan
             children +:= optimize(e)
           } else {
             children = Seq.empty[Expression]
+            nestedFunctions = 0
             val exprNewChildren = e.children.map(p => optimize(p))
             resultExpr = e.withNewChildren(exprNewChildren)
           }
       }
     }
     f(expr)
-    if (name.isDefined || collapsedExpressionExists(children)) {
+    if ((nestedFunctions > 1 && name.isDefined) || collapsedExpressionExists(children)) {
       CHCollapsedExpression(dataType, children, name.getOrElse(""), expr.nullable)
     } else {
       resultExpr

@@ -66,13 +66,12 @@ object CHRuleApi {
     injector.injectResolutionRule(spark => new RewriteDateTimestampComparisonRule(spark))
     injector.injectResolutionRule(spark => new CollapseGetJsonObjectExpressionRule(spark))
     injector.injectResolutionRule(spark => new RepalceFromJsonWithGetJsonObject(spark))
-    injector.injectResolutionRule(spark => new ConvertGetJsonObjectsHaveCommonExpr(spark))
+    injector.injectResolutionRule(spark => new ConvertGetJsonObjectsWithCommonExpr(spark))
     injector.injectOptimizerRule(spark => new CommonSubexpressionEliminateRule(spark))
     injector.injectOptimizerRule(spark => new ExtendedColumnPruning(spark))
     injector.injectOptimizerRule(spark => CHAggregateFunctionRewriteRule(spark))
     injector.injectOptimizerRule(_ => CountDistinctWithoutExpand)
     injector.injectOptimizerRule(_ => EqualToRewrite)
-    injector.injectOptimizerRule(spark => new ConvertGetJsonObjectsHaveCommonExpr(spark))
     injector.injectPreCBORule(spark => new CHOptimizeMetadataOnlyDeltaQuery(spark))
   }
 

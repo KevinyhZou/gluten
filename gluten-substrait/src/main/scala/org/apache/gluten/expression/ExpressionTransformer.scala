@@ -18,8 +18,12 @@ package org.apache.gluten.expression
 
 import org.apache.gluten.substrait.expression.{ExpressionBuilder, ExpressionNode}
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
+import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.types.DataType
+
+import java.util
 
 import scala.collection.JavaConverters._
 
@@ -66,6 +70,27 @@ case class GenericExpressionTransformer(
     children: Seq[ExpressionTransformer],
     original: Expression)
   extends ExpressionTransformer
+  with Logging {
+
+  override def doTransform(args: Object): ExpressionNode = {
+    val OPT_BY_CH_OBJECT_TYPE: TreeNodeTag[Boolean] = TreeNodeTag[Boolean]("opt_by_ch_object_type")
+    original.getTagValue(OPT_BY_CH_OBJECT_TYPE) match {
+      case Some(p) if p =>
+        logInfo("set options here")
+        val functionMap = args.asInstanceOf[java.util.HashMap[String, java.lang.Long]]
+        val funcName: String =
+          ConverterUtils.makeFuncName(substraitExprName, original.children.map(_.dataType))
+        val functionId = ExpressionBuilder.newScalarFunction(functionMap, funcName)
+        val childNodes = children.map(_.doTransform(args)).asJava
+        val typeNode = ConverterUtils.getTypeNode(dataType, nullable)
+        val options = new util.HashMap[String, String]()
+        options.put(OPT_BY_CH_OBJECT_TYPE.name, "true")
+        ExpressionBuilder.makeScalarFunction(functionId, childNodes, typeNode, options)
+      case None =>
+        super.doTransform(args)
+    }
+  }
+}
 
 object GenericExpressionTransformer {
   def apply(

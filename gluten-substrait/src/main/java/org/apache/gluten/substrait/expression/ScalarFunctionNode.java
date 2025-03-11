@@ -20,20 +20,33 @@ import org.apache.gluten.substrait.type.TypeNode;
 
 import io.substrait.proto.Expression;
 import io.substrait.proto.FunctionArgument;
+import io.substrait.proto.FunctionOption;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ScalarFunctionNode implements ExpressionNode, Serializable {
   private final Long functionId;
   private final List<ExpressionNode> expressionNodes = new ArrayList<>();
   private final TypeNode typeNode;
+  private final Map<String, String> options = new HashMap<>();
 
   ScalarFunctionNode(Long functionId, List<ExpressionNode> expressionNodes, TypeNode typeNode) {
     this.functionId = functionId;
     this.expressionNodes.addAll(expressionNodes);
     this.typeNode = typeNode;
+  }
+
+  ScalarFunctionNode(
+      Long functionId,
+      List<ExpressionNode> expressionNodes,
+      TypeNode typeNode,
+      Map<String, String> options) {
+    this(functionId, expressionNodes, typeNode);
+    this.options.putAll(options);
   }
 
   @Override
@@ -46,7 +59,12 @@ public class ScalarFunctionNode implements ExpressionNode, Serializable {
       scalarBuilder.addArguments(functionArgument.build());
     }
     scalarBuilder.setOutputType(typeNode.toProtobuf());
-
+    FunctionOption.Builder optionBuilder = FunctionOption.newBuilder();
+    for (String optionKey : options.keySet()) {
+      optionBuilder.setName(optionKey);
+      optionBuilder.addPreference(options.getOrDefault(optionKey, ""));
+    }
+    scalarBuilder.addOptions(optionBuilder.build());
     Expression.Builder builder = Expression.newBuilder();
     builder.setScalarFunction(scalarBuilder.build());
     return builder.build();

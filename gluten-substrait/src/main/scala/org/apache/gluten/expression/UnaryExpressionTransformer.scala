@@ -23,10 +23,14 @@ import org.apache.gluten.substrait.`type`.ListNode
 import org.apache.gluten.substrait.`type`.MapNode
 import org.apache.gluten.substrait.expression.{ExpressionBuilder, ExpressionNode, StructLiteralNode}
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.types._
 
 import com.google.common.collect.Lists
+
+import java.util
 
 case class ChildTransformer(
     substraitExprName: String,
@@ -48,6 +52,33 @@ case class CastTransformer(substraitExprName: String, child: ExpressionTransform
       typeNode,
       child.doTransform(args),
       SparkShimLoader.getSparkShims.withAnsiEvalMode(original))
+  }
+}
+
+case class TryCastTransformer(
+    substraitExprName: String,
+    child: ExpressionTransformer,
+    original: TryCast)
+  extends UnaryExpressionTransformer
+  with Logging {
+  override def doTransform(args: java.lang.Object): ExpressionNode = {
+    val typeNode = ConverterUtils.getTypeNode(dataType, original.nullable)
+    val OPT_BY_CH_OBJECT_TYPE: TreeNodeTag[Boolean] = TreeNodeTag[Boolean]("opt_by_ch_object_type")
+    original.getTagValue(OPT_BY_CH_OBJECT_TYPE) match {
+      case Some(p) if p =>
+        val options = new util.HashMap[java.lang.String, java.lang.String]()
+        options.put(OPT_BY_CH_OBJECT_TYPE.name, "true")
+        ExpressionBuilder.makeCast(
+          typeNode,
+          child.doTransform(args),
+          SparkShimLoader.getSparkShims.withAnsiEvalMode(original),
+          options)
+      case None =>
+        ExpressionBuilder.makeCast(
+          typeNode,
+          child.doTransform(args),
+          SparkShimLoader.getSparkShims.withAnsiEvalMode(original))
+    }
   }
 }
 

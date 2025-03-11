@@ -344,6 +344,11 @@ object ExpressionConverter extends SQLConfHelper with Logging {
           substraitExprName,
           replaceWithExpressionTransformer0(newCast.child, attributeSeq, expressionsMap),
           newCast)
+      case tc: TryCast =>
+        TryCastTransformer(
+          substraitExprName,
+          replaceWithExpressionTransformer0(tc.child, attributeSeq, expressionsMap),
+          tc)
       case s: String2TrimExpression =>
         val (srcStr, trimStr) = s match {
           case StringTrim(srcStr, trimStr) => (srcStr, trimStr)

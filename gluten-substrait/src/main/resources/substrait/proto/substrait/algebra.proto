@@ -1104,6 +1104,7 @@ message Expression {
     Type type = 1;
     Expression input = 2;
     FailureBehavior failure_behavior = 3;
+    FunctionOption option = 4;
 
     enum FailureBehavior {
       FAILURE_BEHAVIOR_UNSPECIFIED = 0;

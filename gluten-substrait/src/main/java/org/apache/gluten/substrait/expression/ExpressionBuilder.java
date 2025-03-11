@@ -246,6 +246,14 @@ public class ExpressionBuilder {
     return new ScalarFunctionNode(functionId, expressionNodes, typeNode);
   }
 
+  public static ScalarFunctionNode makeScalarFunction(
+      Long functionId,
+      List<ExpressionNode> expressionNodes,
+      TypeNode typeNode,
+      Map<String, String> options) {
+    return new ScalarFunctionNode(functionId, expressionNodes, typeNode, options);
+  }
+
   public static SelectionNode makeSelection(Integer fieldIdx) {
     return new SelectionNode(fieldIdx);
   }
@@ -265,6 +273,14 @@ public class ExpressionBuilder {
   public static CastNode makeCast(
       TypeNode typeNode, ExpressionNode expressionNode, boolean throwOnFailure) {
     return new CastNode(typeNode, expressionNode, throwOnFailure);
+  }
+
+  public static CastNode makeCast(
+      TypeNode typeNode,
+      ExpressionNode expressionNode,
+      boolean throwOnFailure,
+      Map<String, String> options) {
+    return new CastNode(typeNode, expressionNode, throwOnFailure, options);
   }
 
   public static StringMapNode makeStringMap(Map<String, String> values) {

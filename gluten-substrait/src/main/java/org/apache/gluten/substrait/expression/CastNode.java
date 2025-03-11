@@ -19,8 +19,11 @@ package org.apache.gluten.substrait.expression;
 import org.apache.gluten.substrait.type.TypeNode;
 
 import io.substrait.proto.Expression;
+import io.substrait.proto.FunctionOption;
 
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
 public class CastNode implements ExpressionNode, Serializable {
   private final TypeNode typeNode;
@@ -28,10 +31,21 @@ public class CastNode implements ExpressionNode, Serializable {
 
   public final boolean throwOnFailure;
 
+  private final Map<String, String> options = new HashMap<>();
+
   CastNode(TypeNode typeNode, ExpressionNode expressionNode, boolean throwOnFailure) {
     this.typeNode = typeNode;
     this.expressionNode = expressionNode;
     this.throwOnFailure = throwOnFailure;
+  }
+
+  CastNode(
+      TypeNode typeNode,
+      ExpressionNode expressionNode,
+      boolean throwOnFailure,
+      Map<String, String> options) {
+    this(typeNode, expressionNode, throwOnFailure);
+    this.options.putAll(options);
   }
 
   @Override
@@ -46,6 +60,12 @@ public class CastNode implements ExpressionNode, Serializable {
       // Return null on failure.
       castBuilder.setFailureBehaviorValue(1);
     }
+    FunctionOption.Builder optionBuilder = FunctionOption.newBuilder();
+    for (String optionKey : options.keySet()) {
+      optionBuilder.setName(optionKey);
+      optionBuilder.addPreference(options.getOrDefault(optionKey, ""));
+    }
+    castBuilder.setOption(optionBuilder.build());
     Expression.Builder builder = Expression.newBuilder();
     builder.setCast(castBuilder.build());
     return builder.build();

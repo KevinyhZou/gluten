@@ -142,4 +142,8 @@ REGISTER_FUNCTION(FlattenJSONStringOnRequiredFunction)
 {
     factory.registerFunction<FlattenJSONStringOnRequiredFunction>();
 }
+REGISTER_FUNCTION(GetElementFromObject)
+{
+    factory.registerFunction<GetElementFromObject>();
+}
 }

@@ -22,6 +22,10 @@
 #include <string_view>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnTuple.h>
+#include <Columns/ColumnNullable.h>
+#include <Columns/ColumnObject.h>
+#include <Columns/ColumnConst.h>
+#include <Columns/ColumnString.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -55,6 +59,7 @@ namespace ErrorCodes
 {
 extern const int LOGICAL_ERROR;
 extern const int TOO_FEW_ARGUMENTS_FOR_FUNCTION;
+extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
 extern const int ILLEGAL_TYPE_OF_ARGUMENT;
 extern const int ILLEGAL_COLUMN;
 extern const int ILLEGAL_TYPE_OF_ARGUMENT;
@@ -802,6 +807,73 @@ private:
         }
 
         return DB::ColumnTuple::create(std::move(tuple_columns));
+    }
+};
+
+
+class GetElementFromObject : public DB::IFunction
+{
+public:
+    static constexpr auto name = "objectElement";
+
+    static DB::FunctionPtr create(const DB::ContextPtr & context) { return std::make_shared<GetElementFromObject>(context); }
+    explicit GetElementFromObject(DB::ContextPtr) {}
+    ~GetElementFromObject() override = default;
+    String getName() const override { return name; }
+    size_t getNumberOfArguments() const override { return 2; }
+    bool isVariadic() const override { return false; }
+    bool isSuitableForShortCircuitArgumentsExecution(const DB::DataTypesWithConstInfo & /*arguments*/) const override { return false; }
+
+    DB::DataTypePtr getReturnTypeImpl(const DB::ColumnsWithTypeAndName &) const override
+    {
+        return DB::makeNullable(std::make_shared<DB::DataTypeString>());
+    }
+
+    DB::ColumnPtr executeImpl(
+        const DB::ColumnsWithTypeAndName & arguments, const DB::DataTypePtr & /*result_type*/, size_t input_rows_count) const override
+    {
+        auto res = DB::ColumnString::create();
+        if (arguments.size() != 2)
+            throw DB::Exception(DB::ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Function {} input arugments number must be 2.", getName());
+        const auto input_col0 = arguments[0].column;
+        const auto input_col1 = arguments[1].column;
+        const auto * nullable_col = checkAndGetColumn<DB::ColumnNullable>(input_col0.get());
+        const DB::ColumnObject * object_col = nullptr;
+        if (nullable_col)
+            object_col = checkAndGetColumn<DB::ColumnObject>(nullable_col->getNestedColumnPtr().get());
+        else
+            object_col = checkAndGetColumn<DB::ColumnObject>(input_col0.get());
+        if (!object_col)
+            throw DB::Exception(DB::ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Function {} 1st argument must be json type.", getName());
+        
+        const auto * nullable_const_col = checkAndGetColumn<DB::ColumnNullable>(input_col1.get());
+        String path = "";
+        if (nullable_const_col)
+        {
+            const auto * const_col = checkAndGetColumn<DB::ColumnConst>(nullable_const_col->getNestedColumnPtr().get());
+            path = const_col->getDataAt(0).toString();
+        }
+        else
+        {
+            const auto * const_col = checkAndGetColumn<DB::ColumnConst>(input_col1.get());
+            path = const_col->getDataAt(0).toString();
+        }
+        if (startsWith(path, "$."))
+        {
+            path = path.substr(2);
+        }
+        std::pair<const DB::ColumnString *, const DB::ColumnString*> data = object_col->getSharedDataPathsAndValues();
+        std::cout << "1122JJJ:" << object_col->getTypedPaths().size() << std::endl;
+        for (size_t i = 0; i < input_rows_count; i++)
+        {
+            std::cout << "1111222222:" << data.first->size() << " " << data.second->size() << std::endl;
+            if (data.first->getDataAt(i).toString() == path) 
+            {
+                String s = data.second->getDataAt(i).toString();
+                res->insert(s);
+            }
+        }
+        return DB::makeNullable(std::move(res));
     }
 };
 

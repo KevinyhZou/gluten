@@ -42,28 +42,36 @@ public:
         {
             return;
         }
-        prepare(rel);
-        rewriteImpl(rel);
+        if (prepare(rel))
+        {
+            rewriteImpl(rel);
+        }
+        else
+        {
+            std::cout << "function not be rewrited 111..." << std::endl;
+        }
     }
 
 private:
     std::unordered_map<String, std::set<String>> json_required_fields;
 
     /// Collect all get_json_object functions and group by json strings
-    void prepare(const substrait::Rel & rel)
+    bool prepare(const substrait::Rel & rel)
     {
+        bool res = false;
         if (rel.has_filter())
         {
             auto & expr = rel.filter().condition();
-            prepareOnExpression(expr);
+            res = prepareOnExpression(expr);
         }
         if (rel.has_project())
         {
             for (auto & expr : rel.project().expressions())
             {
-                prepareOnExpression(expr);
+                res = prepareOnExpression(expr);
             }
         }
+        return res;
     }
 
     void rewriteImpl(substrait::Rel & rel)
@@ -85,7 +93,7 @@ private:
             }
         }
     }
-    void prepareOnExpression(const substrait::Expression & expr)
+    bool prepareOnExpression(const substrait::Expression & expr)
     {
         switch (expr.rex_type_case())
         {
@@ -110,6 +118,12 @@ private:
             }
             case substrait::Expression::RexTypeCase::kScalarFunction: {
                 const auto & scalar_function_pb = expr.scalar_function();
+                const auto & scalar_function_opts = scalar_function_pb.options();
+                if (scalar_function_opts.size() > 0)
+                {
+                    std::cout << "function can not be rewrited.." << std::endl;
+                    return false;
+                }
                 auto function_signature_name_opt = parser_context->getFunctionNameInSignature(scalar_function_pb);
                 if (!function_signature_name_opt)
                     throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unknow scalar function: {}", scalar_function_pb.DebugString());
@@ -141,6 +155,7 @@ private:
             default:
                 break;
         }
+        return true;
     }
 
     void rewriteExpression(substrait::Expression & expr)

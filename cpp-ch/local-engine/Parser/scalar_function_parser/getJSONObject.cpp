@@ -59,6 +59,7 @@ protected:
         DB::ActionsDAG & actions_dag) const override
     {
         const auto & args = substrait_func.arguments();
+        const auto & options = substrait_func.options();
         if (args.size() != 2)
         {
             throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Function {} requires 2 arguments", getCHFunctionName(substrait_func));
@@ -77,6 +78,14 @@ protected:
                 actions_dag.addOrReplaceInOutputs(*flatten_json_column_node);
             }
             return {flatten_json_column_node, parseExpression(actions_dag, args[1].value())};
+        }
+        else if (options.size() > 0)
+        {
+            const auto * parsed_arg0 = parseExpression(actions_dag, args[0].value());
+            const auto * parsed_arg1 = parseExpression(actions_dag, args[1].value());
+            const auto * object_element_node = toFunctionNode(actions_dag, "objectElement", {parsed_arg0, parsed_arg1});
+            actions_dag.addOrReplaceInOutputs(*object_element_node);
+            return {object_element_node , parseExpression(actions_dag, args[1].value())};
         }
         else
         {

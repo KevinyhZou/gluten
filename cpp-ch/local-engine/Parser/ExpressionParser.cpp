@@ -378,7 +378,14 @@ ExpressionParser::NodeRawConstPtr ExpressionParser::parseExpression(ActionsDAG &
             else
             {
                 /// Common process: CAST(input, type)
-                args.emplace_back(addConstColumn(actions_dag, std::make_shared<DataTypeString>(), output_type->getName()));
+                if (isString(denull_input_type) && isString(denull_output_type) && rel.cast().option().name() == "opt_by_ch_object_type")
+                {
+                    args.emplace_back(addConstColumn(actions_dag, std::make_shared<DataTypeString>(), "JSON"));
+                }
+                else
+                {
+                    args.emplace_back(addConstColumn(actions_dag, std::make_shared<DataTypeString>(), output_type->getName()));
+                }
                 result_node = toFunctionNode(actions_dag, "CAST", args);
             }
 

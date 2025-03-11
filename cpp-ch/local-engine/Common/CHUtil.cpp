@@ -717,6 +717,7 @@ void BackendInitializerUtil::initSettings(const SparkConfigs::ConfigMap & spark_
 
     /// Finally apply some fixed kvs to settings.
     settings.set("join_use_nulls", true);
+    settings.set("enable_json_type", true);
     settings.set("input_format_orc_allow_missing_columns", true);
     settings.set("input_format_orc_case_insensitive_column_matching", true);
     settings.set("input_format_orc_import_nested", true);

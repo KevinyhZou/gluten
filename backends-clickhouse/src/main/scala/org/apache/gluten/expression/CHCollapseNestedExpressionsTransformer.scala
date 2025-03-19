@@ -17,6 +17,7 @@
 package org.apache.gluten.expression
 
 import org.apache.gluten.config.GlutenConfig
+import org.apache.gluten.expression.CHCollapseNestedExpressionsTransformer.expressionCollapseSupported
 import org.apache.gluten.substrait.expression.{ExpressionBuilder, ExpressionNode}
 
 import org.apache.spark.internal.Logging
@@ -47,29 +48,7 @@ case class CHCollapseNestedExpressionsTransformer(
     }
   }
 
-  def getExpressionName(expr: Expression): Option[String] = expr match {
-    case _: And => ExpressionMappings.expressionsMap.get(classOf[And])
-    case _: Or => ExpressionMappings.expressionsMap.get(classOf[Or])
-    case _ => Option.empty[String]
-  }
-
-  private def canBeOptimized(expr: Expression): Boolean = {
-    var exprCall = expr
-    expr match {
-      case a: Alias => exprCall = a.child
-      case _ =>
-    }
-    val exprName = getExpressionName(exprCall)
-    exprName match {
-      case None =>
-        exprCall match {
-          case _: LeafExpression => false
-          case _ => exprCall.children.exists(c => canBeOptimized(c))
-        }
-      case Some(f) =>
-        GlutenConfig.get.getSupportedCollapsedExpressions.split(",").exists(c => c.equals(f))
-    }
-  }
+  private def canBeOptimized(expr: Expression): Boolean = expressionCollapseSupported(expr)
 
   private def doTransform0(
       expr: Expression,
@@ -139,5 +118,19 @@ case class CHCollapseNestedExpressionsTransformer(
     } else {
       doTransform0(expr, dataType, children, childTypes, functionMap)
     }
+  }
+}
+
+object CHCollapseNestedExpressionsTransformer {
+
+  def expressionCollapseSupported(expr: Expression): Boolean = {
+    val supportedExpressionNames = GlutenConfig.get.getSupportedCollapsedExpressions.split(",")
+    var res = false
+    expr match {
+      case _: And => res = supportedExpressionNames.exists(p => p.equals("and"))
+      case _: Or => res = supportedExpressionNames.exists(p => p.equals("or"))
+      case _ => res = expr.children.exists(c => expressionCollapseSupported(c))
+    }
+    res
   }
 }

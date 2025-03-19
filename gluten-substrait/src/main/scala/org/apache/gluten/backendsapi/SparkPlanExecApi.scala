@@ -718,5 +718,5 @@ trait SparkPlanExecApi {
       original: Expression): ExpressionTransformer =
     GenericExpressionTransformer(substraitExprName, children, original)
 
-  def expressionCollapseSupported(exprName: String): Boolean = false
+  def expressionCollapseSupported(expr: Expression): Boolean = false
 }

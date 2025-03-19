@@ -16,7 +16,7 @@
  */
 package org.apache.gluten.execution
 
-import org.apache.gluten.expression.CHCollapsedExpression
+import org.apache.gluten.expression.{CHAnd, CHOr}
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, GlutenTestUtils, Row}
@@ -386,8 +386,9 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
 
       def checkExpression(expr: Expression, functionName: String, argNum: Int): Boolean =
         expr match {
-          case s: CHCollapsedExpression
-              if s.name.equals(functionName) && s.children.size == argNum =>
+          case s: CHAnd if s.name.equals(functionName) && s.children.size == argNum =>
+            true
+          case o: CHOr if o.name.equals(functionName) && o.children.size == argNum =>
             true
           case _ => expr.children.exists(c => checkExpression(c, functionName, argNum))
         }

@@ -23,7 +23,7 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.types.DataType
 
-case class CHCollapsedExpression(
+abstract class CHCollapsedExpression(
     dataType: DataType,
     children: Seq[Expression],
     name: String,
@@ -36,17 +36,37 @@ case class CHCollapsedExpression(
 
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = null
 
+}
+
+case class CHAnd(dataType: DataType, children: Seq[Expression], name: String, nullable: Boolean)
+  extends CHCollapsedExpression(dataType, children, name, nullable) {
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): Expression =
     copy(children = newChildren)
+}
 
+case class CHOr(dataType: DataType, children: Seq[Expression], name: String, nullable: Boolean)
+  extends CHCollapsedExpression(dataType, children, name, nullable) {
+  override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): Expression =
+    copy(children = newChildren)
 }
 
 object CHCollapsedExpression {
 
-  def signature: Sig = Sig[CHCollapsedExpression]("CHCollapsedExpression")
+  def sigAnd: Sig = Sig[CHAnd]("CHAnd")
+  def sigOr: Sig = Sig[CHOr]("CHOr")
 
   def supported(name: String): Boolean = {
     GlutenConfig.get.getSupportedCollapsedExpressions.split(",").exists(p => p.equals(name))
+  }
+
+  def genCollapsedExpression(
+      dataType: DataType,
+      children: Seq[Expression],
+      name: String,
+      nullable: Boolean): Option[CHCollapsedExpression] = name match {
+    case "and" => Option.apply(CHAnd(dataType, children, name, nullable))
+    case "or" => Option.apply(CHOr(dataType, children, name, nullable))
+    case _ => Option.empty
   }
 
 }

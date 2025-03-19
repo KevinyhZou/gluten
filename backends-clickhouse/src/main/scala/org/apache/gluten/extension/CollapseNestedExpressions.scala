@@ -150,7 +150,14 @@ case class CollapseNestedExpressions(spark: SparkSession) extends Rule[SparkPlan
     }
     f(expr)
     if ((nestedFunctions > 1 && name.isDefined) || collapsedExpressionExists(children)) {
-      CHCollapsedExpression(dataType, children, name.getOrElse(""), expr.nullable)
+      CHCollapsedExpression.genCollapsedExpression(
+        dataType,
+        children,
+        name.getOrElse(""),
+        expr.nullable) match {
+        case Some(f) => f
+        case None => resultExpr
+      }
     } else {
       resultExpr
     }

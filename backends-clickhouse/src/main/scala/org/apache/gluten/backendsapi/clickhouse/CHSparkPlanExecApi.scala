@@ -582,7 +582,8 @@ class CHSparkPlanExecApi extends SparkPlanExecApi with Logging {
       Sig[CollectList](ExpressionNames.COLLECT_LIST),
       Sig[CollectSet](ExpressionNames.COLLECT_SET),
       Sig[MonotonicallyIncreasingID](MONOTONICALLY_INCREASING_ID),
-      CHCollapsedExpression.signature
+      CHCollapsedExpression.sigAnd,
+      CHCollapsedExpression.sigOr
     ) ++
       ExpressionExtensionTrait.expressionExtensionTransformer.expressionSigList ++
       SparkShimLoader.getSparkShims.bloomFilterExpressionMappings()
@@ -950,7 +951,8 @@ class CHSparkPlanExecApi extends SparkPlanExecApi with Logging {
     CHRangeExecTransformer(start, end, step, numSlices, numElements, outputAttributes, child)
 
   override def expressionCollapseSupported(expr: Expression): Boolean = expr match {
-    case ce: CHCollapsedExpression => CHCollapsedExpression.supported(ce.name)
+    case ca: CHAnd => CHCollapsedExpression.supported(ca.name)
+    case co: CHOr => CHCollapsedExpression.supported(co.name)
     case _ => false
   }
 
@@ -958,8 +960,8 @@ class CHSparkPlanExecApi extends SparkPlanExecApi with Logging {
       substraitName: String,
       children: Seq[ExpressionTransformer],
       expr: Expression): ExpressionTransformer = expr match {
-    case ce: CHCollapsedExpression =>
-      GenericExpressionTransformer(ce.name, children, ce)
+    case ce: CHAnd => GenericExpressionTransformer(ce.name, children, ce)
+    case co: CHOr => GenericExpressionTransformer(co.name, children, co)
     case _ => super.genCollapsedExpressionTransformer(substraitName, children, expr)
   }
 }

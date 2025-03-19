@@ -38,7 +38,7 @@ abstract class CHCollapsedExpression(children: Seq[Expression], name: String) ex
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = null
 
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): Expression =
-    genCollapsedExpression(dataType, children, name, nullable) match {
+    genCollapsedExpression(dataType, newChildren, name, nullable) match {
       case Some(f) => f
       case None =>
         throw new GlutenException(

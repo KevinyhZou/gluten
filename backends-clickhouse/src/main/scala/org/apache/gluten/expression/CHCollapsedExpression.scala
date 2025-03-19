@@ -23,7 +23,8 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.types.DataType
 
-abstract class CHCollapsedExpression(children: Seq[Expression], name: String) extends Expression {
+abstract class CHCollapsedExpression(children: Seq[Expression] = Seq.empty, name: String = "")
+  extends Expression {
 
   override def toString: String = s"$name(${children.mkString(", ")})"
 

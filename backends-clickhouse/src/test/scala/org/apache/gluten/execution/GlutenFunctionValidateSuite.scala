@@ -408,6 +408,16 @@ class GlutenFunctionValidateSuite extends GlutenClickHouseWholeStageTransformerS
         " or string_field1 is not null") {
       x => assert(checkCollapsedFunctions(x.queryExecution.executedPlan, "or", 3))
     }
+    runQueryAndCompare(
+      "SELECT count(1) from json_test where int_field1 = 5 or double_field1 > 1.0" +
+        " or string_field1 is not null") {
+      x =>
+        assert(
+          checkCollapsedFunctions(
+            x.queryExecution.executedPlan,
+            "and",
+            3) && checkCollapsedFunctions(x.queryExecution.executedPlan, "or", 2))
+    }
   }
 
   test("Test covar_samp") {

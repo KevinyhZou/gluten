@@ -23,12 +23,7 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.types.DataType
 
-abstract class CHCollapsedExpression(
-    dataType: DataType,
-    children: Seq[Expression],
-    name: String,
-    nullable: Boolean = true)
-  extends Expression {
+abstract class CHCollapsedExpression(children: Seq[Expression], name: String) extends Expression {
 
   override def toString: String = s"$name(${children.mkString(", ")})"
 
@@ -39,13 +34,13 @@ abstract class CHCollapsedExpression(
 }
 
 case class CHAnd(dataType: DataType, children: Seq[Expression], name: String, nullable: Boolean)
-  extends CHCollapsedExpression(dataType, children, name, nullable) {
+  extends CHCollapsedExpression(children, name) {
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): Expression =
     copy(children = newChildren)
 }
 
 case class CHOr(dataType: DataType, children: Seq[Expression], name: String, nullable: Boolean)
-  extends CHCollapsedExpression(dataType, children, name, nullable) {
+  extends CHCollapsedExpression(children, name) {
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): Expression =
     copy(children = newChildren)
 }

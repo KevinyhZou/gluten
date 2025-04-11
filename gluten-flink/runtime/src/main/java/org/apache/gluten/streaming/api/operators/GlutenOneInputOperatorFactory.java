@@ -19,14 +19,20 @@ package org.apache.gluten.streaming.api.operators;
 
 import io.github.zhztheplayer.velox4j.plan.PlanNode;
 import io.github.zhztheplayer.velox4j.type.RowType;
+
+import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
+import org.apache.gluten.table.runtime.operators.GlutenCalOperator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** One input operator factory for gluten. */
 public class GlutenOneInputOperatorFactory<IN, OUT> extends AbstractStreamOperatorFactory<OUT>
         implements OneInputStreamOperatorFactory<IN, OUT>  {
+    private static final Logger LOG = LoggerFactory.getLogger(GlutenOneInputOperatorFactory.class);
     private final GlutenOperator operator;
 
     public GlutenOneInputOperatorFactory(GlutenOperator operator) {
@@ -38,12 +44,19 @@ public class GlutenOneInputOperatorFactory<IN, OUT> extends AbstractStreamOperat
     }
 
     @Override
-    public <T extends StreamOperator<OUT>> T createStreamOperator(StreamOperatorParameters<OUT> streamOperatorParameters) {
+    public <T extends StreamOperator<OUT>> T createStreamOperator(StreamOperatorParameters<OUT> parameters) {
+        if (operator instanceof AbstractStreamOperator) {
+            AbstractStreamOperator<OUT> streamOperator = (AbstractStreamOperator<OUT>) operator;
+            streamOperator.setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
+            streamOperator.setProcessingTimeService(processingTimeService);
+            return (T) operator;
+        }
         throw new RuntimeException("Not Implemented");
     }
 
     @Override
     public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
-        throw new RuntimeException("Not Implemented");
+        // throw new RuntimeException("Not Implemented");
+        return GlutenCalOperator.class;
     }
 }

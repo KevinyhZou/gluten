@@ -26,6 +26,8 @@ import io.github.zhztheplayer.velox4j.serde.Serde;
 import io.github.zhztheplayer.velox4j.type.RowType;
 import org.apache.gluten.streaming.api.operators.GlutenOperator;
 import org.apache.gluten.vectorized.VLVectorIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.gluten.vectorized.FlinkRowToVLVectorConvertor;
 
 import io.github.zhztheplayer.velox4j.Velox4j;
@@ -38,6 +40,8 @@ import io.github.zhztheplayer.velox4j.query.Query;
 import io.github.zhztheplayer.velox4j.session.Session;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
@@ -48,6 +52,8 @@ import java.util.List;
 /** Calculate operator in gluten, which will call Velox to run. */
 public class GlutenCalOperator extends TableStreamOperator<RowData>
         implements OneInputStreamOperator<RowData, RowData>, GlutenOperator {
+
+    private static final Logger LOG = LoggerFactory.getLogger(GlutenCalOperator.class);
 
     private final String glutenPlan;
     private final String id;
@@ -81,6 +87,7 @@ public class GlutenCalOperator extends TableStreamOperator<RowData>
                         id,
                         -1,
                         new ExternalStreamConnectorSplit("connector-external-stream", es.id())));
+        LOG.info("glutenPlan:" + glutenPlan);
         PlanNode filter = Serde.fromJson(glutenPlan, PlanNode.class);
         query = new Query(filter, splits, Config.empty(), ConnectorConfig.empty());
         allocator = new RootAllocator(Long.MAX_VALUE);

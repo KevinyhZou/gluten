@@ -50,8 +50,11 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-import javax.annotation.Nullable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
 
@@ -63,6 +66,8 @@ import java.util.List;
         minPlanVersion = FlinkVersion.v1_15,
         minStateVersion = FlinkVersion.v1_15)
 public class StreamExecCalc extends CommonExecCalc implements StreamExecNode<RowData> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(StreamExecCalc.class);
 
     public StreamExecCalc(
             ReadableConfig tableConfig,
@@ -132,6 +137,7 @@ public class StreamExecCalc extends CommonExecCalc implements StreamExecNode<Row
                 Utils.getNamesFromRowType(getOutputType()),
                 projectExprs);
         // TODO: velo4j not support serializable now.
+        LOG.info("before registry..");
         Utils.registerRegistry();
         String plan = Serde.toJson(project);
         String inputStr = Serde.toJson(inputType);

@@ -37,6 +37,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.graph.TransformationTranslator;
+import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
@@ -46,18 +47,26 @@ import org.apache.flink.streaming.api.transformations.StreamExchangeMode;
 import org.apache.flink.streaming.runtime.operators.sink.CommitterOperatorFactory;
 import org.apache.flink.streaming.runtime.operators.sink.SinkWriterOperatorFactory;
 import org.apache.flink.streaming.runtime.partitioner.ForwardPartitioner;
+import org.apache.flink.table.runtime.generated.GeneratedClass;
+import org.apache.flink.table.runtime.operators.CodeGenOperatorFactory;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.util.Preconditions;
 
 import io.github.zhztheplayer.velox4j.connector.CommitStrategy;
 import io.github.zhztheplayer.velox4j.connector.DiscardDataTableHandle;
+import io.github.zhztheplayer.velox4j.plan.ProjectNode;
 import io.github.zhztheplayer.velox4j.plan.TableWriteNode;
 import io.github.zhztheplayer.velox4j.serde.Serde;
 import io.github.zhztheplayer.velox4j.type.BigIntType;
 import io.github.zhztheplayer.velox4j.type.RowType;
+import javassist.compiler.CodeGen;
+
 import org.apache.gluten.streaming.api.operators.GlutenOneInputOperatorFactory;
 import org.apache.gluten.table.runtime.operators.GlutenCalOperator;
 import org.apache.gluten.util.LogicalTypeConverter;
+import org.apache.gluten.util.Utils;
 
 import javax.annotation.Nullable;
 
@@ -117,6 +126,7 @@ public class SinkTransformationTranslator<Input, Output>
      * the input having that parallelism.
      */
     private static class SinkExpander<T> {
+        private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(SinkExpander.class);
         private final SinkTransformation<T, ?> transformation;
         private final Sink<T> sink;
         private final Context context;
@@ -148,7 +158,9 @@ public class SinkTransformationTranslator<Input, Output>
         }
 
         private void expand() {
-
+            
+            Utils.registerRegistry();
+            
             final int sizeBefore = executionEnvironment.getTransformations().size();
 
             DataStream<T> prewritten = inputStream;
@@ -178,8 +190,20 @@ public class SinkTransformationTranslator<Input, Output>
             } else {
                 if (sink instanceof DiscardingSink) {
                     RowType outputType = (RowType) LogicalTypeConverter.toVLType(
-                            ((InternalTypeInfo) transformation.getOutputType()).toLogicalType());
+                            ((InternalTypeInfo<?>) transformation.getOutputType()).toLogicalType());
                     RowType outType = new RowType(List.of("num"), List.of(new BigIntType()));
+                    if (inputStream.getTransformation() instanceof OneInputTransformation) {
+                        OneInputTransformation<?, ?> oneInputTrans = (OneInputTransformation) inputStream.getTransformation();
+                        StreamOperatorFactory<?> operatorFactory = oneInputTrans.getOperatorFactory();
+                        if (operatorFactory instanceof CodeGenOperatorFactory) {
+                            GeneratedClass<? extends StreamOperator<?>> generatedClass = ((CodeGenOperatorFactory) operatorFactory).getGeneratedClass();
+                            if (generatedClass.getClassName().startsWith("StreamExecCalc$")) {
+                                TypeInformation<?> oneInputType = oneInputTrans.getInputType();
+                                TypeInformation<?> oneOutputType = oneInputTrans.getOutputType();
+                                ProjectNode projectNode = new ProjectNode(String.valueOf(oneInputTrans.getId()), null, null, null);
+                            }
+                        }
+                    }
                     String plan = Serde.toJson(new TableWriteNode(
                             String.valueOf(transformation.getId()),
                             outputType,
@@ -193,17 +217,24 @@ public class SinkTransformationTranslator<Input, Output>
                             null));
                     adjustTransformations(
                             prewritten,
-                            input ->
-                                    input.transform(
+                            input -> {
+                                TypeInformation<?> inputTypeInfo = input.getType();
+                                String inputTypeString = "";
+                                if (inputTypeInfo instanceof InternalTypeInfo) {
+                                        io.github.zhztheplayer.velox4j.type.Type inputType =  LogicalTypeConverter.toVLType(((InternalTypeInfo<?>) inputTypeInfo).toLogicalType());
+                                        inputTypeString = Serde.toJson(inputType);
+                                }
+                                return input.transform(
                                             WRITER_NAME,
                                             CommittableMessageTypeInfo.noOutput(),
                                             new GlutenOneInputOperatorFactory(
                                                     new GlutenCalOperator(
                                                             plan,
                                                             String.valueOf(transformation.getId()),
-                                                            "",
+                                                            inputTypeString,
                                                             Serde.toJson(outType)
-                                                    ))),
+                                                    )));
+                                                },
                             false,
                             sink instanceof SupportsConcurrentExecutionAttempts);
                 } else {

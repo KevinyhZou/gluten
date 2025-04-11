@@ -23,12 +23,16 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 /** Convertor to convert Flink LogicalType to velox data Type */
 public class LogicalTypeConverter {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LogicalTypeConverter.class);
 
     public static Type toVLType(LogicalType logicalType) {
         if (logicalType instanceof RowType) {
@@ -46,6 +50,7 @@ public class LogicalTypeConverter {
         } else if (logicalType instanceof VarCharType) {
             return new io.github.zhztheplayer.velox4j.type.VarCharType();
         } else {
+            LOG.error("logicalType.class:" + logicalType.getClass().getName());
             throw new RuntimeException("Unsupported logical type: " + logicalType);
         }
     }

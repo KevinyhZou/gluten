@@ -52,9 +52,9 @@ import io.github.zhztheplayer.velox4j.iterator.UpIterators;
  import io.github.zhztheplayer.velox4j.memory.AllocationListener;
  import io.github.zhztheplayer.velox4j.memory.MemoryManager;
  import io.github.zhztheplayer.velox4j.plan.TableScanNode;
- import io.github.zhztheplayer.velox4j.query.BoundSplit;
  import io.github.zhztheplayer.velox4j.query.Query;
- import io.github.zhztheplayer.velox4j.session.Session;
+import io.github.zhztheplayer.velox4j.query.SerialTask;
+import io.github.zhztheplayer.velox4j.session.Session;
  
  import java.util.ArrayList;
 import java.util.Arrays;
@@ -98,7 +98,7 @@ import java.util.List;
  
    private Query query;
 
-   private UpIterator upIterator;
+   private SerialTask task;
  
    private boolean running = false;
  
@@ -193,14 +193,11 @@ import java.util.List;
     return new GlutenSourceFunction(getTableScanNode(), 
       (io.github.zhztheplayer.velox4j.type.RowType)veloxOutputType, planNodeId, getConnectionSplit());
    }
- 
-   /**
-    * Pull the kafka record from the queue, and emit it to the next operator. 
-    */
+   
    @Override
    public InputStatus pollNext(ReaderOutput<T> output) throws Exception {
-     if (running && upIterator != null && upIterator.advance() == UpIterator.State.AVAILABLE) {
-       RowVector rowVector = upIterator.get();
+     if (running && task != null && task.advance() == UpIterator.State.AVAILABLE) {
+       RowVector rowVector = task.get();
        List<RowData> rows = FlinkRowToVLVectorConvertor.toRowData(rowVector, allocator, 
          (io.github.zhztheplayer.velox4j.type.RowType) veloxOutputType);
        for (RowData row : rows) {
@@ -216,10 +213,11 @@ import java.util.List;
      LOG.info("Add kafka partitons to consume: {}", splits.toString());
      topicPartitions.addAll(splits);
      KafkaConnectorSplit kafkaConnectorSplit = getConnectionSplit();
-     List<BoundSplit> veloxSplits = List.of(new BoundSplit(planNodeId, -1, kafkaConnectorSplit));
      TableScanNode kafkaScan = getTableScanNode();
-     query = new Query(kafkaScan, veloxSplits, Config.empty(), ConnectorConfig.empty());
-     upIterator = session.queryOps().execute(query);
+     query = new Query(kafkaScan, Config.empty(), ConnectorConfig.empty());
+     task = session.queryOps().execute(query);
+     task.addSplit(planNodeId, kafkaConnectorSplit);
+     task.noMoreSplits(planNodeId);
    }
  
    @Override
@@ -234,8 +232,8 @@ import java.util.List;
    @Override
    public void close() throws Exception {
      running = false;
-     if (upIterator != null) {
-      upIterator.close();
+     if (task != null) {
+      task.close();
      }
      if (session != null) {
        session.close();

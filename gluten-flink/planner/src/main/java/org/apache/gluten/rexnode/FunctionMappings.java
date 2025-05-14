@@ -38,6 +38,7 @@ public class FunctionMappings {
             put("-", new SubtractFunctionConverter("subtract"));
             put("MOD", new DefaultFunctionConverter("remainder"));
             put("AND", new DefaultFunctionConverter("and"));
+            put("Reinterpret", new DefaultFunctionConverter("cast"));
         }
     };
 

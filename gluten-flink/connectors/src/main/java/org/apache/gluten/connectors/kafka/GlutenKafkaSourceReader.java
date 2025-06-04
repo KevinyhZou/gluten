@@ -112,18 +112,21 @@ import java.util.List;
    private boolean operatorChained = true;
    private PlanChainingHandler planChainingHandler;
    private EventBus planChainningPoster;
+   private final io.github.zhztheplayer.velox4j.type.Type veloxProjectedOutType;
  
    public GlutenKafkaSourceReader(
        String planNodeId,
        PlanChainingHandler handler,
        String format,
        DataType outputType,
+       DataType projectedType,
        Properties props) {
      this.planNodeId = planNodeId;
      this.format = format;
      this.props = props;
      this.outputType = outputType;
      this.veloxOutputType = LogicalTypeConverter.toVLType(outputType.getLogicalType());
+     this.veloxProjectedOutType = LogicalTypeConverter.toVLType(projectedType.getLogicalType());
      this.topicPartitions = new ArrayList<>();
      this.memoryManager = MemoryManager.create(AllocationListener.NOOP);
      this.session = Velox4j.newSession(memoryManager);
@@ -199,6 +202,7 @@ import java.util.List;
     //    new ArrayList<>(),
     //    null,
     //    (io.github.zhztheplayer.velox4j.type.RowType) veloxOutputType,
+    //    (io.github.zhztheplayer.velox4j.type.RowType) veloxProjectedOutType,
     //    tableParams);
    }
 

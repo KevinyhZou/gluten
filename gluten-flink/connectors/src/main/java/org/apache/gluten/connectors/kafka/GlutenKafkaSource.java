@@ -37,14 +37,15 @@
  import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
  import org.apache.flink.core.io.SimpleVersionedSerializer;
  import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
- import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
+import org.apache.flink.table.types.DataType;
 import org.apache.gluten.table.runtime.plan.SupportsPlanChaining;
 import org.apache.gluten.table.runtime.plan.PlanChainingHandler;
 import org.slf4j.Logger;
  import org.slf4j.LoggerFactory;
  
  public class GlutenKafkaSource<OUT>
-    implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>, ResultTypeQueryable<OUT>, SupportsPlanChaining {
+    implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>, ResultTypeQueryable<OUT>, SupportsProjectionPushDown, SupportsPlanChaining {
  
    private static final Logger LOG = LoggerFactory.getLogger(GlutenKafkaSource.class);
  
@@ -63,8 +64,9 @@ import org.slf4j.Logger;
    private final OffsetsInitializer stoppingOffsetsInitializer;
  
    private String planNodeId;
+   private DataType projectedDataType;
    private PlanChainingHandler planChainingHandler;
- 
+   
    public GlutenKafkaSource(
      String planNodeId,
      String format,
@@ -91,7 +93,7 @@ import org.slf4j.Logger;
  
    @Override
    public SourceReader<OUT, KafkaPartitionSplit> createReader(SourceReaderContext readerContext) throws Exception {
-     return new GlutenKafkaSourceReader<>(planNodeId, planChainingHandler, format, outputType, properties);
+     return new GlutenKafkaSourceReader<>(planNodeId, planChainingHandler, format, outputType, projectedDataType, properties);
    }
  
    @Override
@@ -162,6 +164,16 @@ import org.slf4j.Logger;
   @Override
   public void setPlanChainingHandler(PlanChainingHandler handler) {
     this.planChainingHandler = handler;
+  }
+
+  @Override
+  public boolean supportsNestedProjection() {
+    return false;
+  }
+
+  @Override
+  public void applyProjection(int[][] projectedFields, DataType projectedDataType) {
+    this.projectedDataType = projectedDataType;
   }
  
  }

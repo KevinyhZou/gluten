@@ -59,19 +59,19 @@ public class GlutenSingleInputOperator extends TableStreamOperator<RowData>
 
     private static final Logger LOG = LoggerFactory.getLogger(GlutenSingleInputOperator.class);
 
-    private final PlanNode glutenPlan;
+    protected final PlanNode glutenPlan;
     private final String id;
     private final RowType inputType;
     private final RowType outputType;
 
-    private StreamRecord<RowData> outElement = null;
+    protected StreamRecord<RowData> outElement = null;
 
     private MemoryManager memoryManager;
-    private Session session;
-    private Query query;
+    protected Session session;
+    protected Query query;
     private ExternalStreams.BlockingQueue inputQueue;
     private BufferAllocator allocator;
-    private SerialTask task;
+    protected SerialTask task;
 
     public GlutenSingleInputOperator(PlanNode plan, String id, RowType inputType, RowType outputType) {
         this.glutenPlan = plan;
@@ -88,19 +88,25 @@ public class GlutenSingleInputOperator extends TableStreamOperator<RowData>
         session = Velox4j.newSession(memoryManager);
         inputQueue = session.externalStreamOps().newBlockingQueue();
         // add a mock input as velox not allow the source is empty.
-        PlanNode mockInput = new TableScanNode(
-                id,
-                inputType,
-                new ExternalStreamTableHandle("connector-external-stream"),
-                List.of());
-        glutenPlan.setSources(List.of(mockInput));
-        LOG.debug("Gluten Plan: {}", Serde.toJson(glutenPlan));
-        query = new Query(glutenPlan, Config.empty(), ConnectorConfig.empty());
-        allocator = new RootAllocator(Long.MAX_VALUE);
-        task = session.queryOps().execute(query);
-        ExternalStreamConnectorSplit split = new ExternalStreamConnectorSplit("connector-external-stream", inputQueue.id());
-        task.addSplit(id, split);
-        task.noMoreSplits(id);
+        if (queueAsSource()) {
+            PlanNode mockInput = new TableScanNode(
+                    id,
+                    inputType,
+                    new ExternalStreamTableHandle("connector-external-stream"),
+                    List.of());
+            glutenPlan.setSources(List.of(mockInput));
+            LOG.debug("Gluten Plan: {}", Serde.toJson(glutenPlan));
+            query = new Query(glutenPlan, Config.empty(), ConnectorConfig.empty());
+            allocator = new RootAllocator(Long.MAX_VALUE);
+            task = session.queryOps().execute(query);
+            ExternalStreamConnectorSplit split = new ExternalStreamConnectorSplit("connector-external-stream", inputQueue.id());
+            task.addSplit(id, split);
+            task.noMoreSplits(id);
+        }
+    }
+
+    public boolean queueAsSource() {
+        return true;
     }
 
     @Override

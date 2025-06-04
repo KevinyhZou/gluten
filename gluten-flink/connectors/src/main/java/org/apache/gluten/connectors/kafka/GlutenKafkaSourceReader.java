@@ -28,13 +28,18 @@ import java.util.stream.Collectors;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
  import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.shaded.guava31.com.google.common.eventbus.EventBus;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartitionStateSentinel;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
  import org.apache.flink.table.types.DataType;
- import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
  import org.apache.kafka.common.TopicPartition;
  import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.gluten.table.runtime.operators.GlutenSourceFunction;
+import org.apache.gluten.table.runtime.plan.PlanChainingHandler;
+import org.apache.gluten.table.runtime.plan.PlanEvent;
 import org.apache.gluten.util.LogicalTypeConverter;
  import org.apache.gluten.vectorized.FlinkRowToVLVectorConvertor;
  import org.slf4j.Logger;
@@ -54,6 +59,8 @@ import io.github.zhztheplayer.velox4j.iterator.UpIterators;
  import io.github.zhztheplayer.velox4j.plan.TableScanNode;
  import io.github.zhztheplayer.velox4j.query.Query;
 import io.github.zhztheplayer.velox4j.query.SerialTask;
+import io.github.zhztheplayer.velox4j.serde.NativeBean;
+import io.github.zhztheplayer.velox4j.serde.Serde;
 import io.github.zhztheplayer.velox4j.session.Session;
  
  import java.util.ArrayList;
@@ -101,9 +108,14 @@ import java.util.List;
    private SerialTask task;
  
    private boolean running = false;
+   private RowData outRow;
+   private boolean operatorChained = true;
+   private PlanChainingHandler planChainingHandler;
+   private EventBus planChainningPoster;
  
    public GlutenKafkaSourceReader(
        String planNodeId,
+       PlanChainingHandler handler,
        String format,
        DataType outputType,
        Properties props) {
@@ -116,6 +128,11 @@ import java.util.List;
      this.memoryManager = MemoryManager.create(AllocationListener.NOOP);
      this.session = Velox4j.newSession(memoryManager);
      this.allocator = new RootAllocator(Long.MAX_VALUE);
+     this.planChainningPoster = new EventBus(CONNECTOR_ID);
+     this.planChainingHandler = handler;
+     if (planChainingHandler != null) {
+      planChainningPoster.register(planChainingHandler);
+     }
    }
  
    private KafkaConnectorSplit getConnectionSplit() {
@@ -174,14 +191,15 @@ import java.util.List;
      tableParams.put(KEY_ENABLE_AUTO_COMMIT, props.getProperty(KEY_ENABLE_AUTO_COMMIT, "true"));
      tableParams.put(KEY_AUTO_OFFSET_RESET, props.getProperty(KEY_AUTO_OFFSET_RESET, "latest"));
      tableParams.put(KEY_STARTUP_MODE, props.getProperty(KEY_STARTUP_MODE, "group-offsets"));
-     return new KafkaTableHandle(
-       CONNECTOR_ID,
-       topic,
-       false,
-       new ArrayList<>(),
-       null,
-       (io.github.zhztheplayer.velox4j.type.RowType) veloxOutputType,
-       tableParams);
+     return null;
+    //  return new KafkaTableHandle(
+    //    CONNECTOR_ID,
+    //    topic,
+    //    false,
+    //    new ArrayList<>(),
+    //    null,
+    //    (io.github.zhztheplayer.velox4j.type.RowType) veloxOutputType,
+    //    tableParams);
    }
 
    private TableScanNode getTableScanNode() {
@@ -196,28 +214,50 @@ import java.util.List;
    
    @Override
    public InputStatus pollNext(ReaderOutput<T> output) throws Exception {
-     if (running && task != null && task.advance() == UpIterator.State.AVAILABLE) {
-       RowVector rowVector = task.get();
-       List<RowData> rows = FlinkRowToVLVectorConvertor.toRowData(rowVector, allocator, 
-         (io.github.zhztheplayer.velox4j.type.RowType) veloxOutputType);
-       for (RowData row : rows) {
-         output.collect((T) row);
-       }
-       rowVector.close();
-     }
-     return running ? InputStatus.MORE_AVAILABLE : InputStatus.NOTHING_AVAILABLE;
+    if (!operatorChained) {
+      if (running && task != null && task.advance() == UpIterator.State.AVAILABLE) {
+        RowVector rowVector = task.get();
+        List<RowData> rows = FlinkRowToVLVectorConvertor.toRowData(rowVector, allocator, 
+          (io.github.zhztheplayer.velox4j.type.RowType) veloxOutputType);
+        for (RowData row : rows) {
+          output.collect((T) row);
+        }
+        rowVector.close();
+      }
+    } else if (outRow != null) {
+      output.collect((T)outRow);
+    }
+    return running ? InputStatus.MORE_AVAILABLE : InputStatus.NOTHING_AVAILABLE;
    }
 
    @Override
    public void addSplits(List<KafkaPartitionSplit> splits) {
      LOG.info("Add kafka partitons to consume: {}", splits.toString());
-     topicPartitions.addAll(splits);
-     KafkaConnectorSplit kafkaConnectorSplit = getConnectionSplit();
-     TableScanNode kafkaScan = getTableScanNode();
-     query = new Query(kafkaScan, Config.empty(), ConnectorConfig.empty());
-     task = session.queryOps().execute(query);
-     task.addSplit(planNodeId, kafkaConnectorSplit);
-     task.noMoreSplits(planNodeId);
+     if (!operatorChained) {
+      topicPartitions.addAll(splits);
+      KafkaConnectorSplit kafkaConnectorSplit = getConnectionSplit();
+      TableScanNode kafkaScan = getTableScanNode();
+      query = new Query(kafkaScan, Config.empty(), ConnectorConfig.empty());
+      task = session.queryOps().execute(query);
+      task.addSplit(planNodeId, kafkaConnectorSplit);
+      task.noMoreSplits(planNodeId);
+     } else {
+      try {
+        RowType outputRowType = (RowType)this.outputType.getLogicalType();
+        int arity = outputRowType.getFieldCount();
+        GenericRowData rowData = new GenericRowData(arity);
+        outRow = rowData;
+
+        TableScanNode tableScanNode = getTableScanNode();
+        KafkaConnectorSplit connectorSplit = getConnectionSplit();
+        String tableScanJsonPlan = Serde.toJson((NativeBean)tableScanNode);
+        String connectorSplitJsonString = Serde.toJson((NativeBean)connectorSplit);
+        PlanEvent planEvent = new PlanEvent(CONNECTOR_ID, tableScanJsonPlan, connectorSplitJsonString);
+        planChainningPoster.post(planEvent);
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
+     }
    }
  
    @Override

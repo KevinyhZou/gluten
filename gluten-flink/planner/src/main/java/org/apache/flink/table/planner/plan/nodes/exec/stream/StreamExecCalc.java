@@ -18,7 +18,10 @@
 package org.apache.flink.table.planner.plan.nodes.exec.stream;
 
 import org.apache.gluten.rexnode.Utils;
+import org.apache.gluten.table.runtime.operators.GlutenChainedOperator;
 import org.apache.gluten.table.runtime.operators.GlutenSingleInputOperator;
+import org.apache.gluten.table.runtime.plan.PlanChainingHandler;
+import org.apache.gluten.table.runtime.plan.SupportsPlanChaining;
 import org.apache.gluten.util.LogicalTypeConverter;
 import org.apache.gluten.rexnode.RexNodeConverter;
 
@@ -29,6 +32,7 @@ import io.github.zhztheplayer.velox4j.plan.ProjectNode;
 
 import org.apache.calcite.rex.RexNode;
 import org.apache.flink.FlinkVersion;
+import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.data.RowData;
@@ -47,6 +51,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.gluten.util.PlanNodeIdGenerator;
 
 import javax.annotation.Nullable;
@@ -112,6 +117,14 @@ public class StreamExecCalc extends CommonExecCalc implements StreamExecNode<Row
                 (Transformation<RowData>) inputEdge.translateToPlan(planner);
 
         // --- Begin Gluten-specific code changes ---
+        boolean kafkaSource = false;
+        if (inputTransform instanceof SourceTransformation) {
+                SourceTransformation<RowData, ?, ?> sourceTrans = (SourceTransformation<RowData, ?, ?>) inputTransform;
+                Class<?> sourceClazz = sourceTrans.getSource().getClass();
+                if (sourceClazz.getSimpleName().equals("GlutenKafkaSource")) {
+                        kafkaSource = true;
+                }
+        }
         io.github.zhztheplayer.velox4j.type.RowType inputType =
                 (io.github.zhztheplayer.velox4j.type.RowType)
                         LogicalTypeConverter.toVLType(inputEdge.getOutputType());
@@ -132,12 +145,25 @@ public class StreamExecCalc extends CommonExecCalc implements StreamExecNode<Row
         io.github.zhztheplayer.velox4j.type.RowType outputType =
                 (io.github.zhztheplayer.velox4j.type.RowType)
                         LogicalTypeConverter.toVLType(getOutputType());
-        final GlutenSingleInputOperator calOperator =
-                new GlutenSingleInputOperator(
-                        project,
-                        PlanNodeIdGenerator.newId(),
-                        inputType,
-                        outputType);
+        final GlutenSingleInputOperator calOperator;
+        if (kafkaSource) {
+                SourceTransformation<RowData, ?, ?> sourceTrans = (SourceTransformation<RowData, ?, ?>) inputTransform;
+                Source<RowData, ?, ? > source = sourceTrans.getSource();
+                calOperator = new GlutenChainedOperator(project,
+                                PlanNodeIdGenerator.newId(),
+                                inputType,
+                                outputType);
+                if (source instanceof SupportsPlanChaining) {
+                        ((SupportsPlanChaining) source).setPlanChainingHandler(
+                                new PlanChainingHandler((GlutenChainedOperator) calOperator));
+                }
+        } else {
+                calOperator = new GlutenSingleInputOperator(
+                                project,
+                                PlanNodeIdGenerator.newId(),
+                                inputType,
+                                outputType);
+        }
         return ExecNodeUtil.createOneInputTransformation(
                 inputTransform,
                 new TransformationMetadata("gluten-calc", "Gluten cal operator"),

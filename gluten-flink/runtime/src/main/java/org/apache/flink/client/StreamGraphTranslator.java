@@ -27,6 +27,7 @@ import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.gluten.streaming.api.operators.GlutenOneInputOperatorFactory;
+import org.apache.gluten.table.runtime.operators.GlutenChainedOperator;
 import org.apache.gluten.table.runtime.operators.GlutenSingleInputOperator;
 import org.apache.gluten.table.runtime.operators.GlutenSourceFunction;
 
@@ -145,12 +146,21 @@ public class StreamGraphTranslator implements FlinkPipelineTranslator {
                                             sourceOperator.getId(),
                                             streamSource.getConnectorSplit())));
                 } else {
-                    taskConfig.setStreamOperator(
-                            new GlutenSingleInputOperator(
-                                    outNode,
-                                    outOperator.getId(),
-                                    sourceOperator.getInputType(),
-                                    outOperator.getOutputType()));
+                    GlutenSingleInputOperator inputOperator;
+                    if (sourceOperator instanceof GlutenChainedOperator) {
+                        inputOperator = new GlutenChainedOperator(
+                            outNode, 
+                            outOperator.getId(),
+                            sourceOperator.getInputType(),
+                            sourceOperator.getOutputType());
+                    } else {
+                        inputOperator = new GlutenSingleInputOperator(
+                            outNode,
+                            outOperator.getId(),
+                            sourceOperator.getInputType(),
+                            outOperator.getOutputType());
+                    }
+                    taskConfig.setStreamOperator(inputOperator);
                 }
                 taskConfig.setChainedOutputs(outTask.getChainedOutputs(userClassloader));
                 taskConfig.setOperatorNonChainedOutputs(

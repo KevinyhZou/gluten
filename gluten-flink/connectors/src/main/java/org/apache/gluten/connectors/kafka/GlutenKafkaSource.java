@@ -38,11 +38,13 @@
  import org.apache.flink.core.io.SimpleVersionedSerializer;
  import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
  import org.apache.flink.table.types.DataType;
- import org.slf4j.Logger;
+import org.apache.gluten.table.runtime.plan.SupportsPlanChaining;
+import org.apache.gluten.table.runtime.plan.PlanChainingHandler;
+import org.slf4j.Logger;
  import org.slf4j.LoggerFactory;
  
  public class GlutenKafkaSource<OUT>
-    implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>, ResultTypeQueryable<OUT> {
+    implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>, ResultTypeQueryable<OUT>, SupportsPlanChaining {
  
    private static final Logger LOG = LoggerFactory.getLogger(GlutenKafkaSource.class);
  
@@ -61,6 +63,7 @@
    private final OffsetsInitializer stoppingOffsetsInitializer;
  
    private String planNodeId;
+   private PlanChainingHandler planChainingHandler;
  
    public GlutenKafkaSource(
      String planNodeId,
@@ -88,7 +91,7 @@
  
    @Override
    public SourceReader<OUT, KafkaPartitionSplit> createReader(SourceReaderContext readerContext) throws Exception {
-     return new GlutenKafkaSourceReader<>(planNodeId, format, outputType, properties);
+     return new GlutenKafkaSourceReader<>(planNodeId, planChainingHandler, format, outputType, properties);
    }
  
    @Override
@@ -155,5 +158,10 @@
    public SimpleVersionedSerializer<KafkaSourceEnumState> getEnumeratorCheckpointSerializer() {
      return new KafkaSourceEnumStateSerializer();
    }
+
+  @Override
+  public void setPlanChainingHandler(PlanChainingHandler handler) {
+    this.planChainingHandler = handler;
+  }
  
  }

@@ -91,7 +91,7 @@ import org.slf4j.Logger;
  
    @Override
    public SourceReader<OUT, KafkaPartitionSplit> createReader(SourceReaderContext readerContext) throws Exception {
-     return new GlutenKafkaSourceReader<>(planNodeId, planChainingHandler, format, outputType, properties);
+     return new GlutenKafkaSourceReader<>(planNodeId, planChainingHandler, format, outputType, properties, readerContext);
    }
  
    @Override

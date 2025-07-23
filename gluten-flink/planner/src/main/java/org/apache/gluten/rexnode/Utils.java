@@ -84,7 +84,7 @@ public class Utils {
       io.github.zhztheplayer.velox4j.type.RowType inputType,
       int[] joinKeys,
       List<int[]> upsertKeys) {
-    Set<Integer> joinKeySet = new HashSet();
+    Set<Integer> joinKeySet = new HashSet<>();
     Arrays.stream(joinKeys).forEach(joinKeySet::add);
     List<int[]> uniqueKeysContainedByJoinKey =
         upsertKeys.stream()

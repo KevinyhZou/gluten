@@ -29,10 +29,13 @@ import org.apache.arrow.vector.DateDayVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
+import org.apache.arrow.vector.holders.TimeStampMilliTZHolder;
 import org.apache.arrow.vector.types.DateUnit;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.pojo.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -68,8 +71,14 @@ public abstract class ArrowVectorWriter {
                   new VarCharVectorWriter(fieldType, allocator, vector)),
           Map.entry(
               TimestampType.class,
-              (fieldType, allocator, vector) ->
-                  new TimestampVectorWriter(fieldType, allocator, vector)),
+              (fieldType, allocator, vector) -> {
+                TimestampType timestampType = (TimestampType) fieldType;
+                if (timestampType.getTimeZone() == null) {
+                  return new TimestampVectorWriter(fieldType, allocator, vector);
+                } else {
+                  return new TimestampTZVectorWriter(fieldType, allocator, vector);
+                }
+              }),
           Map.entry(
               DateType.class,
               (fieldType, allocator, vector) ->
@@ -99,7 +108,11 @@ public abstract class ArrowVectorWriter {
       String fieldName, Type fieldType, BufferAllocator allocator, FieldVector vector) {
     if (vector == null) {
       // Build an empty vector
-      vector = FieldVectorCreator.create(fieldName, fieldType, false, allocator, null);
+      String timeZoneId = null;
+      if (fieldType instanceof TimestampType) {
+        timeZoneId = ((TimestampType) fieldType).getTimeZone();
+      }
+      vector = FieldVectorCreator.create(fieldName, fieldType, false, allocator, timeZoneId);
     }
     WriterBuilder builder = writerBuilders.get(fieldType.getClass());
     if (builder == null) {
@@ -418,6 +431,39 @@ class TimestampVectorWriter extends BaseVectorWriter<TimeStampMilliVector, Long>
   }
 }
 
+class TimestampTZVectorWriter extends BaseVectorWriter<TimeStampMilliTZVector, Long> {
+  private static final Logger LOG = LoggerFactory.getLogger(TimestampTZVectorWriter.class);
+  private final int precision = 3;
+  private final String timeZone;
+
+  public TimestampTZVectorWriter(Type fieldType, BufferAllocator allocator, FieldVector vector) {
+    super(vector);
+    TimestampType timestampType = (TimestampType) fieldType;
+    timeZone = timestampType.getTimeZone();
+  }
+
+  @Override
+  protected Long getValue(RowData rowData, int fieldIndex) {
+    long value = rowData.getTimestamp(fieldIndex, precision).getMillisecond();
+    LOG.info("value: {}, fieldIndex:{}", value, fieldIndex);
+    LOG.info("rowData.111:{}", rowData.getTimestamp(fieldIndex, 0).getMillisecond());
+    return value;
+  }
+
+  protected Long getValue(ArrayData arrayData, int index) {
+    return arrayData.getTimestamp(index, precision).getMillisecond();
+  }
+
+  @Override
+  protected void setValue(int index, Long value) {
+    TimeStampMilliTZHolder holder = new TimeStampMilliTZHolder();
+    LOG.info("value:{}, timezone:{}", value, timeZone);
+    holder.value = value;
+    holder.timezone = timeZone;
+    this.typedVector.setSafe(index, holder);
+  }
+}
+
 class DateDayVectorWriter extends BaseVectorWriter<DateDayVector, Integer> {
   public DateDayVectorWriter(Type fieldType, BufferAllocator allocator, FieldVector vector) {
     super(vector);
@@ -441,7 +487,6 @@ class DateDayVectorWriter extends BaseVectorWriter<DateDayVector, Integer> {
 
 class StructVectorWriter extends BaseVectorWriter<StructVector, RowData> {
   private final int fieldCount;
-  private BufferAllocator allocator;
   private final List<ArrowVectorWriter> fieldWriters;
 
   public StructVectorWriter(Type fieldType, BufferAllocator allocator, FieldVector vector) {

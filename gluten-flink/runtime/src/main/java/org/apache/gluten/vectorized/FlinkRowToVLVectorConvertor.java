@@ -35,13 +35,13 @@ import java.util.List;
 
 /** Converter between velox RowVector and Flink RowData. */
 public class FlinkRowToVLVectorConvertor {
+
   public static RowVector fromRowData(
       RowData row, BufferAllocator allocator, Session session, RowType rowType) {
     List<FieldVector> arrowVectors = new ArrayList<>(rowType.size());
     List<Type> fieldTypes = rowType.getChildren();
     List<String> fieldNames = rowType.getNames();
     for (int i = 0; i < rowType.size(); i++) {
-      Type fieldType = rowType.getChildren().get(i);
       ArrowVectorWriter writer =
           ArrowVectorWriter.create(fieldNames.get(i), fieldTypes.get(i), allocator);
       writer.write(i, row);

@@ -62,7 +62,10 @@ public class RexCallConverterFactory {
           Map.entry("CAST", Arrays.asList(() -> new DefaultRexCallConverter("cast"))),
           Map.entry("CASE", Arrays.asList(() -> new DefaultRexCallConverter("if"))),
           Map.entry("AND", Arrays.asList(() -> new DefaultRexCallConverter("and"))),
-          Map.entry("SEARCH", Arrays.asList(() -> new DefaultRexCallConverter("in"))));
+          Map.entry("SEARCH", Arrays.asList(() -> new DefaultRexCallConverter("in"))),
+          Map.entry("DATE_FORMAT", Arrays.asList(() -> new DefaultRexCallConverter("date_format"))),
+          Map.entry(
+              "PROCTIME", Arrays.asList(() -> new DefaultRexCallConverter("current_timestamp"))));
 
   public static RexCallConverter getConverter(RexCall callNode, RexConversionContext context) {
     String operatorName = callNode.getOperator().getName();

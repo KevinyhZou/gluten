@@ -18,7 +18,7 @@ package org.apache.flink.table.planner.plan.nodes.exec.stream;
 
 import org.apache.gluten.streaming.api.operators.GlutenOperator;
 import org.apache.gluten.table.runtime.keyselector.GlutenKeySelector;
-import org.apache.gluten.table.runtime.operators.GlutenSingleInputOperator;
+import org.apache.gluten.table.runtime.operators.GlutenVectorOneInputOperator;
 import org.apache.gluten.util.LogicalTypeConverter;
 import org.apache.gluten.util.PlanNodeIdGenerator;
 
@@ -163,7 +163,7 @@ public class StreamExecExchange extends CommonExecExchange implements StreamExec
           PlanNode exchange =
               new StreamPartitionNode(id, localPartition, inputTransform.getParallelism());
           final OneInputStreamOperator exchangeKeyGenerator =
-              new GlutenSingleInputOperator(
+              new GlutenVectorOneInputOperator(
                   new StatefulPlanNode(id, exchange), id, glutenInputType, Map.of(id, outputType));
           inputTransform =
               ExecNodeUtil.createOneInputTransformation(

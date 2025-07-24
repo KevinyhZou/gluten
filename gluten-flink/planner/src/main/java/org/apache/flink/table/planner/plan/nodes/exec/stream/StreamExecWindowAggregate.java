@@ -17,7 +17,7 @@
 package org.apache.flink.table.planner.plan.nodes.exec.stream;
 
 import org.apache.gluten.rexnode.AggregateCallConverter;
-import org.apache.gluten.table.runtime.operators.GlutenSingleInputOperator;
+import org.apache.gluten.table.runtime.operators.GlutenVectorOneInputOperator;
 import org.apache.gluten.util.LogicalTypeConverter;
 import org.apache.gluten.util.PlanNodeIdGenerator;
 
@@ -31,6 +31,7 @@ import io.github.zhztheplayer.velox4j.window.WindowFunction;
 import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.table.data.RowData;
@@ -203,14 +204,13 @@ public class StreamExecWindowAggregate extends StreamExecWindowAggregateBase {
             getWindowType(windowing.getWindow()),
             getWindowParameters(windowing));
 
-    final GlutenSingleInputOperator windowOperator =
-        new GlutenSingleInputOperator(
+    final OneInputStreamOperator windowOperator =
+        new GlutenVectorOneInputOperator(
             new StatefulPlanNode(windowNode.getId(), windowNode),
             PlanNodeIdGenerator.newId(),
             inputType,
             Map.of(windowNode.getId(), outputType));
     // --- End Gluten-specific code changes ---
-    LOG.info("enable transform here");
     final OneInputTransformation<RowData, RowData> transform =
         ExecNodeUtil.createOneInputTransformation(
             inputTransform,

@@ -425,7 +425,7 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin
                           csvInputConfig.getClass(), csvInputConfig, "fieldDelim"));
       FileSystemIndexTableHandle tableHandle =
           new FileSystemIndexTableHandle(
-              "connector-fs-lookup",
+              "connector-filesystem",
               "lookupTable",
               (io.github.zhztheplayer.velox4j.type.RowType)
                   LogicalTypeConverter.toVLType(new RowType(fields)),

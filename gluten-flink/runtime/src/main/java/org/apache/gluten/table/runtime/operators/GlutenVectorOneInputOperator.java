@@ -56,7 +56,9 @@ import java.util.Map;
 
 /** Calculate operator in gluten, which will call Velox to run. */
 public class GlutenVectorOneInputOperator extends TableStreamOperator<StatefulRecord>
-    implements OneInputStreamOperator<StatefulRecord, StatefulRecord>, Triggerable<StatefulRecord, StatefulRecord>, GlutenOperator {
+    implements OneInputStreamOperator<StatefulRecord, StatefulRecord>,
+        Triggerable<StatefulRecord, StatefulRecord>,
+        GlutenOperator {
 
   private static final Logger LOG = LoggerFactory.getLogger(GlutenVectorOneInputOperator.class);
 
@@ -170,7 +172,8 @@ public class GlutenVectorOneInputOperator extends TableStreamOperator<StatefulRe
   }
 
   @Override
-  public void onProcessingTime(InternalTimer<StatefulRecord, StatefulRecord> timer) throws Exception {
+  public void onProcessingTime(InternalTimer<StatefulRecord, StatefulRecord> timer)
+      throws Exception {
     UpIterator.State state = task.advance();
     if (state == UpIterator.State.AVAILABLE) {
       final StatefulElement statefulElement = task.statefulGet();

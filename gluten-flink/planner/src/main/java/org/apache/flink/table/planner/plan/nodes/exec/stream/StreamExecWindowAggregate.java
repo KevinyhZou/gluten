@@ -16,7 +16,6 @@
  */
 package org.apache.flink.table.planner.plan.nodes.exec.stream;
 
-import org.apache.gluten.rexnode.AggregateCallConverter;
 import org.apache.gluten.table.runtime.operators.GlutenVectorOneInputOperator;
 import org.apache.gluten.util.LogicalTypeConverter;
 import org.apache.gluten.util.PlanNodeIdGenerator;
@@ -187,7 +186,8 @@ public class StreamExecWindowAggregate extends StreamExecWindowAggregateBase {
           FieldAccessTypedExpr.create(LogicalTypeConverter.toVLType(keyType), keyName);
       groupKeys.add(keyField);
     }
-    List<WindowFunction> functions = AggregateCallConverter.toFunctions(aggCalls, inputType);
+    // List<WindowFunction> functions = AggregateCallConverter.toFunctions(aggCalls, inputType);
+    List<WindowFunction> functions = null;
     List<String> colNames =
         outputType.getNames().stream()
             .skip(grouping.length)

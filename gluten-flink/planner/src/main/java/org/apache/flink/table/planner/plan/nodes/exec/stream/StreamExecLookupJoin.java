@@ -24,6 +24,10 @@ import org.apache.gluten.util.LogicalTypeConverter;
 import org.apache.gluten.util.PlanNodeIdGenerator;
 import org.apache.gluten.util.ReflectUtils;
 
+import io.github.zhztheplayer.velox4j.connector.Assignment;
+import io.github.zhztheplayer.velox4j.connector.ColumnHandle;
+import io.github.zhztheplayer.velox4j.connector.ColumnType;
+import io.github.zhztheplayer.velox4j.connector.FileSystemColumnHandle;
 import io.github.zhztheplayer.velox4j.connector.FileSystemIndexTableHandle;
 import io.github.zhztheplayer.velox4j.expression.FieldAccessTypedExpr;
 import io.github.zhztheplayer.velox4j.expression.TypedExpr;
@@ -33,9 +37,9 @@ import io.github.zhztheplayer.velox4j.plan.IndexLookupJoinNode;
 import io.github.zhztheplayer.velox4j.plan.PlanNode;
 import io.github.zhztheplayer.velox4j.plan.StatefulPlanNode;
 import io.github.zhztheplayer.velox4j.plan.TableScanNode;
+import io.github.zhztheplayer.velox4j.type.Type;
 
 import org.apache.flink.FlinkVersion;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
@@ -83,7 +87,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.RowType.RowField;
 import org.apache.flink.table.types.utils.TypeConversions;
-import org.apache.flink.types.Row;
 import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -432,14 +435,22 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin
               lookupKeys.keySet().stream().mapToInt(Integer::intValue).toArray(),
               asyncLookup,
               tableParameters);
-      TypeInformation<Row> outputType = csvLookupFunc.getResultType();
+      RowType outputType =
+          (RowType)
+              TypeConversions.fromLegacyInfoToDataType(csvLookupFunc.getResultType())
+                  .getLogicalType();
+      io.github.zhztheplayer.velox4j.type.RowType vlRowType =
+          (io.github.zhztheplayer.velox4j.type.RowType) LogicalTypeConverter.toVLType(outputType);
+      List<Assignment> columnHandles = new ArrayList<>();
+      for (int i = 0; i < vlRowType.size(); i++) {
+        final String name = vlRowType.getNames().get(i);
+        final Type type = vlRowType.getChildren().get(i);
+        ColumnHandle column = new FileSystemColumnHandle(name, ColumnType.REGULAR, type, List.of());
+        Assignment assignment = new Assignment(name, column);
+        columnHandles.add(assignment);
+      }
       TableScanNode scanNode =
-          new TableScanNode(
-              PlanNodeIdGenerator.newId(),
-              LogicalTypeConverter.toVLType(
-                  TypeConversions.fromLegacyInfoToDataType(outputType).getLogicalType()),
-              tableHandle,
-              new ArrayList<>());
+          new TableScanNode(PlanNodeIdGenerator.newId(), vlRowType, tableHandle, columnHandles);
       return scanNode;
     } else {
       String errMsg =

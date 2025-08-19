@@ -16,6 +16,8 @@
  */
 package org.apache.gluten.table.runtime.operators;
 
+import org.apache.gluten.table.runtime.metrics.SourceTaskMetrics;
+
 import io.github.zhztheplayer.velox4j.Velox4j;
 import io.github.zhztheplayer.velox4j.config.Config;
 import io.github.zhztheplayer.velox4j.config.ConnectorConfig;
@@ -32,6 +34,8 @@ import io.github.zhztheplayer.velox4j.stateful.StatefulElement;
 import io.github.zhztheplayer.velox4j.type.RowType;
 
 import org.apache.flink.api.common.state.CheckpointListener;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -60,6 +64,9 @@ public class GlutenVectorSourceFunction extends RichParallelSourceFunction<State
   BufferAllocator allocator;
   private MemoryManager memoryManager;
   private SerialTask task;
+  private Counter sourceNumRecordsOut;
+  private Counter sourceNumBytesOut;
+  private SourceTaskMetrics sourceTaskMetrics;
 
   public GlutenVectorSourceFunction(
       StatefulPlanNode planNode,
@@ -90,6 +97,25 @@ public class GlutenVectorSourceFunction extends RichParallelSourceFunction<State
   }
 
   @Override
+  public void open(Configuration parameters) throws Exception {
+    super.open(parameters);
+    sourceNumRecordsOut =
+        getRuntimeContext().getMetricGroup().getIOMetricGroup().getNumRecordsOutCounter();
+    sourceNumBytesOut =
+        getRuntimeContext().getMetricGroup().getIOMetricGroup().getNumBytesOutCounter();
+    sourceTaskMetrics = SourceTaskMetrics.getInstance();
+  }
+
+  private void updateSourceMetrics(SerialTask task) {
+    if (sourceTaskMetrics.updateMetrics(task, id)) {
+      long numRecordsOut = sourceTaskMetrics.getSourceRecordsOut();
+      long numBytesOut = sourceTaskMetrics.getSourceBytesOut();
+      sourceNumRecordsOut.inc(numRecordsOut - sourceNumRecordsOut.getCount());
+      sourceNumBytesOut.inc(numBytesOut - sourceNumBytesOut.getCount());
+    }
+  }
+
+  @Override
   public void run(SourceContext<StatefulElement> sourceContext) throws Exception {
     LOG.debug("Running GlutenSourceFunction: " + Serde.toJson(planNode));
     memoryManager = MemoryManager.create(AllocationListener.NOOP);
@@ -112,6 +138,7 @@ public class GlutenVectorSourceFunction extends RichParallelSourceFunction<State
         LOG.info("Velox task finished");
         break;
       }
+      updateSourceMetrics(task);
     }
 
     task.close();

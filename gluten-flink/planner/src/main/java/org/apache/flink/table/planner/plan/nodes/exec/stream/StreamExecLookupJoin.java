@@ -23,6 +23,7 @@ import org.apache.gluten.table.runtime.operators.GlutenVectorOneInputOperator;
 import org.apache.gluten.util.LogicalTypeConverter;
 import org.apache.gluten.util.PlanNodeIdGenerator;
 import org.apache.gluten.util.ReflectUtils;
+import org.apache.gluten.velox.IndexLookupJoinBuilder;
 
 import io.github.zhztheplayer.velox4j.connector.Assignment;
 import io.github.zhztheplayer.velox4j.connector.ColumnHandle;
@@ -42,13 +43,8 @@ import io.github.zhztheplayer.velox4j.type.Type;
 import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
-import org.apache.flink.streaming.api.operators.KeyedProcessOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.streaming.runtime.partitioner.KeyGroupStreamPartitioner;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.AsyncTableFunction;
@@ -67,20 +63,13 @@ import org.apache.flink.table.planner.plan.nodes.exec.StateMetadata;
 import org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecLookupJoin;
 import org.apache.flink.table.planner.plan.nodes.exec.spec.TemporalTableSourceSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodeUtil;
-import org.apache.flink.table.planner.plan.utils.KeySelectorUtil;
 import org.apache.flink.table.planner.plan.utils.LookupJoinUtil;
 import org.apache.flink.table.planner.plan.utils.LookupJoinUtil.FieldRefLookupKey;
 import org.apache.flink.table.planner.plan.utils.LookupJoinUtil.LookupKey;
 import org.apache.flink.table.planner.utils.ShortcutUtils;
-import org.apache.flink.table.runtime.keyselector.EmptyRowDataKeySelector;
-import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.operators.join.FlinkJoinType;
-import org.apache.flink.table.runtime.operators.join.lookup.KeyedLookupJoinWrapper;
-import org.apache.flink.table.runtime.operators.join.lookup.LookupJoinRunner;
 import org.apache.flink.table.runtime.operators.join.lookup.ResultRetryStrategy;
-import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.runtime.util.StateConfigUtil;
 import org.apache.flink.table.sources.CsvTableSource.CsvLookupFunction;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -96,6 +85,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.tools.RelBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -103,9 +94,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-
-import static org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecSink.PARTITIONER_TRANSFORMATION;
 
 /** {@link StreamExecNode} for temporal table join that implemented by lookup. */
 @ExecNodeMetadata(
@@ -116,8 +104,8 @@ import static org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecSi
     minStateVersion = FlinkVersion.v1_15)
 public class StreamExecLookupJoin extends CommonExecLookupJoin
     implements StreamExecNode<RowData>, MultipleTransformationTranslator<RowData> {
+  private static final Logger LOG = LoggerFactory.getLogger(StreamExecLookupJoin.class);
   public static final String FIELD_NAME_REQUIRE_UPSERT_MATERIALIZE = "requireUpsertMaterialize";
-
   public static final String FIELD_NAME_LOOKUP_KEY_CONTAINS_PRIMARY_KEY =
       "lookupKeyContainsPrimaryKey";
 
@@ -224,13 +212,13 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin
   }
 
   @Override
-  @SuppressWarnings("unchecked")
   public Transformation<RowData> translateToPlanInternal(
       PlannerBase planner, ExecNodeConfig config) {
     return createJoinTransformation(
         planner, config, upsertMaterialize, lookupKeyContainsPrimaryKey);
   }
 
+  @SuppressWarnings({"rawtypes", "unchecked"})
   @Override
   protected Transformation<RowData> createJoinTransformation(
       PlannerBase planner,
@@ -295,8 +283,8 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin
             getVeloxJoinType(joinType),
             getLeftKeys(inputRowType, lookupKeys),
             getRightKeys(tableSourceRowType, lookupKeys),
-            getJoinConditions(),
-            getFilter(inputRowType),
+            getJoinConditions(tableSourceRowType),
+            null,
             getLeftTable(inputTransformation),
             getRightTable(lookupFunction, lookupKeys, isAsyncEnabled),
             joinOutputType);
@@ -366,23 +354,23 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin
     return rightKeys;
   }
 
-  private List<IndexLookupCondition> getJoinConditions() {
-    /// TODO:: support to convert the join conditions
-    return new ArrayList<>();
-  }
-
-  private TypedExpr getFilter(RowType inputRowType) {
-    RexNode filter =
+  private List<IndexLookupCondition> getJoinConditions(RowType inputRowType) {
+    final RexNode filter =
         (RexNode)
-            ReflectUtils.getObjectField(CommonExecLookupJoin.class, this, "preFilterCondition");
+            ReflectUtils.getObjectField(CommonExecLookupJoin.class, this, "filterOnTemporalTable");
     if (filter == null) {
-      return null;
+      LOG.info("return null here");
+      return new ArrayList<>();
     }
     List<String> inNames = inputRowType.getFieldNames();
     RexConversionContext conversionContext = new RexConversionContext(inNames);
-    return RexNodeConverter.toTypedExpr(filter, conversionContext);
+    TypedExpr filterExpr = RexNodeConverter.toTypedExpr(filter, conversionContext);
+    List<IndexLookupCondition> conditions = List.of(IndexLookupJoinBuilder.build(filterExpr));
+    LOG.info("conditions.size:" + conditions.size());
+    return conditions;
   }
 
+  @SuppressWarnings("rawtypes")
   private PlanNode getLeftTable(Transformation<RowData> inputTrans) {
     if (inputTrans instanceof OneInputTransformation) {
       OneInputTransformation oneInputTrans = (OneInputTransformation) inputTrans;
@@ -466,7 +454,7 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin
       RelOptTable temporalTable,
       ExecNodeConfig config,
       ClassLoader classLoader,
-      Map<Integer, LookupJoinUtil.LookupKey> allLookupKeys,
+      Map<Integer, LookupKey> allLookupKeys,
       TableFunction<?> syncLookupFunction,
       RelBuilder relBuilder,
       RowType inputRowType,
@@ -475,90 +463,6 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin
       boolean isLeftOuterJoin,
       boolean isObjectReuseEnabled,
       boolean lookupKeyContainsPrimaryKey) {
-
-    final long stateRetentionTime =
-        StateMetadata.getStateTtlForOneInputOperator(config, stateMetadataList);
-
-    // create lookup function first
-    ProcessFunction<RowData, RowData> processFunction =
-        createSyncLookupJoinFunction(
-            temporalTable,
-            config,
-            classLoader,
-            allLookupKeys,
-            syncLookupFunction,
-            relBuilder,
-            inputRowType,
-            tableSourceRowType,
-            resultRowType,
-            isLeftOuterJoin,
-            isObjectReuseEnabled);
-
-    RowType rightRowType =
-        getRightOutputRowType(getProjectionOutputRelDataType(relBuilder), tableSourceRowType);
-
-    KeyedLookupJoinWrapper keyedLookupJoinWrapper =
-        new KeyedLookupJoinWrapper(
-            (LookupJoinRunner) processFunction,
-            StateConfigUtil.createTtlConfig(stateRetentionTime),
-            InternalSerializers.create(rightRowType),
-            lookupKeyContainsPrimaryKey);
-
-    KeyedProcessOperator<RowData, RowData, RowData> operator =
-        new KeyedProcessOperator<>(keyedLookupJoinWrapper);
-
-    List<Integer> refKeys =
-        allLookupKeys.values().stream()
-            .filter(key -> key instanceof LookupJoinUtil.FieldRefLookupKey)
-            .map(key -> ((LookupJoinUtil.FieldRefLookupKey) key).index)
-            .collect(Collectors.toList());
-    RowDataKeySelector keySelector;
-
-    // use single parallelism for empty key shuffle
-    boolean singleParallelism = refKeys.isEmpty();
-    if (singleParallelism) {
-      // all lookup keys are constants, then use an empty key selector
-      keySelector = EmptyRowDataKeySelector.INSTANCE;
-    } else {
-      // make it a deterministic asc order
-      Collections.sort(refKeys);
-      keySelector =
-          KeySelectorUtil.getRowDataSelector(
-              classLoader,
-              refKeys.stream().mapToInt(Integer::intValue).toArray(),
-              InternalTypeInfo.of(inputRowType));
-    }
-    final KeyGroupStreamPartitioner<RowData, RowData> partitioner =
-        new KeyGroupStreamPartitioner<>(
-            keySelector, KeyGroupRangeAssignment.DEFAULT_LOWER_BOUND_MAX_PARALLELISM);
-    Transformation<RowData> partitionedTransform =
-        new PartitionTransformation<>(inputTransformation, partitioner);
-    createTransformationMeta(PARTITIONER_TRANSFORMATION, "Partitioner", "Partitioner", config)
-        .fill(partitionedTransform);
-    if (singleParallelism) {
-      setSingletonParallelism(partitionedTransform);
-    } else {
-      partitionedTransform.setParallelism(inputTransformation.getParallelism(), false);
-    }
-
-    OneInputTransformation<RowData, RowData> transform =
-        ExecNodeUtil.createOneInputTransformation(
-            partitionedTransform,
-            createTransformationMeta(LOOKUP_JOIN_MATERIALIZE_TRANSFORMATION, config),
-            operator,
-            InternalTypeInfo.of(resultRowType),
-            partitionedTransform.getParallelism(),
-            false);
-    transform.setStateKeySelector(keySelector);
-    transform.setStateKeyType(keySelector.getProducedType());
-    if (singleParallelism) {
-      setSingletonParallelism(transform);
-    }
-    return transform;
-  }
-
-  private void setSingletonParallelism(Transformation<RowData> transformation) {
-    transformation.setParallelism(1);
-    transformation.setMaxParallelism(1);
+    throw new UnsupportedOperationException("Unimplemented method 'createSyncLookupJoinWithState'");
   }
 }

@@ -25,9 +25,11 @@ import java.util.stream.Collectors;
  import org.apache.arrow.memory.RootAllocator;
  import org.apache.flink.api.connector.source.ReaderOutput;
  import org.apache.flink.api.connector.source.SourceReader;
+ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
  import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.shaded.guava31.com.google.common.eventbus.EventBus;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartitionStateSentinel;
 import org.apache.flink.table.data.GenericRowData;
@@ -37,6 +39,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
  import org.apache.kafka.common.TopicPartition;
  import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+ import org.apache.gluten.table.runtime.metrics.TaskMetrics;
 import org.apache.gluten.table.runtime.operators.GlutenSourceFunction;
 import org.apache.gluten.table.runtime.plan.PlanChainingHandler;
 import org.apache.gluten.table.runtime.plan.PlanEvent;
@@ -112,13 +115,17 @@ import java.util.List;
    private boolean operatorChained = true;
    private PlanChainingHandler planChainingHandler;
    private EventBus planChainningPoster;
+   private TaskMetrics taskMetrics;
+   private Counter numBytesOut;
+   private Counter numRecordsOut;
  
    public GlutenKafkaSourceReader(
        String planNodeId,
        PlanChainingHandler handler,
        String format,
        DataType outputType,
-       Properties props) {
+       Properties props,
+       SourceReaderContext context) {
      this.planNodeId = planNodeId;
      this.format = format;
      this.props = props;
@@ -133,6 +140,9 @@ import java.util.List;
      if (planChainingHandler != null) {
       planChainningPoster.register(planChainingHandler);
      }
+     taskMetrics = TaskMetrics.getInstance();
+     numBytesOut = context.metricGroup().getIOMetricGroup().getNumBytesOutCounter();
+     numRecordsOut = context.metricGroup().getIOMetricGroup().getNumRecordsOutCounter();
    }
  
    private KafkaConnectorSplit getConnectionSplit() {
@@ -226,6 +236,8 @@ import java.util.List;
       }
     } else if (outRow != null) {
       output.collect((T)outRow);
+      numBytesOut.inc(taskMetrics.getSourceBytesOut() - numBytesOut.getCount());
+      numRecordsOut.inc(taskMetrics.getSourceRecordsOut() - numRecordsOut.getCount());
     }
     return running ? InputStatus.MORE_AVAILABLE : InputStatus.NOTHING_AVAILABLE;
    }

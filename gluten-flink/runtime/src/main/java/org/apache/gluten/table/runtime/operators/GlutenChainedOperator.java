@@ -17,12 +17,14 @@
 
 package org.apache.gluten.table.runtime.operators;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
+import org.apache.gluten.table.runtime.metrics.TaskMetrics;
 import org.apache.gluten.table.runtime.plan.PlanEvent;
 import org.apache.gluten.table.runtime.plan.SupportsPlanChaining;
 
@@ -39,6 +41,7 @@ import io.github.zhztheplayer.velox4j.type.RowType;
 public class GlutenChainedOperator extends GlutenSingleInputOperator implements SupportsPlanChaining {
 
   private static final Map<PlanNode, ConnectorSplit> plans = new HashMap<>();
+  private TaskMetrics taskMetrics;
   private boolean running = false;
 
   public GlutenChainedOperator(PlanNode plan, String id, RowType inputType, RowType outputType) {
@@ -49,6 +52,7 @@ public class GlutenChainedOperator extends GlutenSingleInputOperator implements 
   public void open() throws Exception {
     super.open();
     plans.put(glutenPlan, null);
+    taskMetrics = TaskMetrics.getInstance();
   }
 
   private void startTask() {
@@ -74,6 +78,14 @@ public class GlutenChainedOperator extends GlutenSingleInputOperator implements 
     return false;
   }
 
+  private List<String> getPlanIds() {
+    List<String> planIds = new ArrayList<>();
+    for (PlanNode plan : plans.keySet()) {
+      planIds.add(plan.getId());
+    }
+    return planIds;
+  }
+
   @Override
   public void processElement(StreamRecord<RowData> element) {
     if (!running) {
@@ -83,6 +95,7 @@ public class GlutenChainedOperator extends GlutenSingleInputOperator implements 
     if (rowData != null) {
       output.collect(outElement.replace(rowData));
     }
+    taskMetrics.updateMetrics(task, getPlanIds());
     try {
       Thread.sleep(100);
     } catch (Exception ignore) {

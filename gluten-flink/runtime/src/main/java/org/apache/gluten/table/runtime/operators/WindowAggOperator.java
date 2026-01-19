@@ -39,7 +39,6 @@ import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType.RowField;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
 import org.slf4j.Logger;
@@ -49,9 +48,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class WindowAggOperator<W> extends GlutenVectorOneInputOperator {
+public class WindowAggOperator<IN, OUT, W> extends GlutenOneInputOperator<IN, OUT> {
   private static final Logger LOG = LoggerFactory.getLogger(WindowAggOperator.class);
-  private static final ObjectMapper json = new ObjectMapper();
   private final String windowStateName = "window-aggs";
   private WindowValueState<W> windowState;
   private InternalTypeInfo<RowData> keyType;
@@ -63,10 +61,13 @@ public class WindowAggOperator<W> extends GlutenVectorOneInputOperator {
       String id,
       RowType inputType,
       Map<String, RowType> outputTypes,
+      Class<IN> inClass,
+      Class<OUT> outClass,
+      String description,
       InternalTypeInfo<RowData> keyType,
       String[] accNames,
       LogicalType[] accTypes) {
-    super(plan, id, inputType, outputTypes);
+    super(plan, id, inputType, outputTypes, inClass, outClass, description);
     this.keyType = keyType;
     this.accNames = accNames;
     this.accTypes = accTypes;
@@ -120,7 +121,17 @@ public class WindowAggOperator<W> extends GlutenVectorOneInputOperator {
                   LogicalTypeConverter.toVLType(
                       new org.apache.flink.table.types.logical.RowType(accFields))),
               Map.of(windowStateName, new BigIntType()));
-      LOG.info("parameters:{}", json.writeValueAsString(parameters));
+      LOG.info("jobId:{}, {}", jobId, operartorId);
+      LOG.info(
+          "db:{}, read:{}, write:{}",
+          dbInstance.getNativeHandle(),
+          keyedStateBackend.getReadOptions().getNativeHandle(),
+          keyedStateBackend.getWriteOptions().getNativeHandle());
+      LOG.info("columnFaimlyed:{}", columnFamilyHandle.getNativeHandle());
+      LOG.info(
+          "keyType:{}, valueType:{}",
+          keyType.toLogicalType().asSummaryString(),
+          new org.apache.flink.table.types.logical.RowType(accFields).asSummaryString());
     }
   }
 

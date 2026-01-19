@@ -18,12 +18,15 @@ package org.apache.gluten.table.runtime.config;
 
 import io.github.zhztheplayer.velox4j.session.Session;
 
+import org.apache.flink.runtime.state.KeyedStateBackend;
+
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 
 public class VeloxSessionConfig implements Serializable {
   private final Map<String, Session> sessions;
+  private KeyedStateBackend<?> keyedStateBackend;
 
   private static VeloxSessionConfig config = new VeloxSessionConfig();
 
@@ -41,5 +44,13 @@ public class VeloxSessionConfig implements Serializable {
 
   public Session getSession(String id) {
     return sessions.getOrDefault(id, null);
+  }
+
+  public KeyedStateBackend<?> getKeyedStateBackend() {
+    return keyedStateBackend;
+  }
+
+  public void setKeyedStateBackend(KeyedStateBackend<?> keyedStateBackend) {
+    this.keyedStateBackend = keyedStateBackend;
   }
 }

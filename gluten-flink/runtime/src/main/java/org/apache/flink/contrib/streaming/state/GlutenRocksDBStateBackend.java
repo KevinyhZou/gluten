@@ -17,11 +17,14 @@
 package org.apache.flink.contrib.streaming.state;
 
 import org.apache.gluten.table.runtime.config.VeloxSessionConfig;
+import org.apache.gluten.util.ReflectUtils;
 
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.runtime.state.AbstractKeyedStateBackend;
+import org.apache.flink.runtime.state.ConfigurableStateBackend;
 import org.apache.flink.runtime.state.DefaultOperatorStateBackendBuilder;
 import org.apache.flink.runtime.state.OperatorStateBackend;
+import org.apache.flink.runtime.state.StateBackend;
 
 import java.io.IOException;
 
@@ -34,6 +37,14 @@ public class GlutenRocksDBStateBackend extends RocksDBStateBackend {
 
   @Override
   public RocksDBStateBackend configure(ReadableConfig config, ClassLoader classLoader) {
+    StateBackend checkpointStreamBackend = this.getCheckpointBackend();
+    if (checkpointStreamBackend instanceof ConfigurableStateBackend) {
+      ((ConfigurableStateBackend) checkpointStreamBackend).configure(config, classLoader);
+    }
+    EmbeddedRocksDBStateBackend rocksDBStateBackend =
+        (EmbeddedRocksDBStateBackend)
+            ReflectUtils.getObjectField(RocksDBStateBackend.class, this, "rocksDBStateBackend");
+    rocksDBStateBackend.configure(config, classLoader);
     return this;
   }
 

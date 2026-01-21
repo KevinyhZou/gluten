@@ -41,15 +41,12 @@ import org.apache.flink.table.types.logical.RowType.RowField;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 public class WindowAggOperator<IN, OUT, W> extends GlutenOneInputOperator<IN, OUT> {
-  private static final Logger LOG = LoggerFactory.getLogger(WindowAggOperator.class);
   private final String windowStateName = "window-aggs";
   private WindowValueState<W> windowState;
   private InternalTypeInfo<RowData> keyType;
@@ -71,6 +68,18 @@ public class WindowAggOperator<IN, OUT, W> extends GlutenOneInputOperator<IN, OU
     this.keyType = keyType;
     this.accNames = accNames;
     this.accTypes = accTypes;
+  }
+
+  public InternalTypeInfo<RowData> getKeyTye() {
+    return keyType;
+  }
+
+  public String[] getAggregateNames() {
+    return accNames;
+  }
+
+  public LogicalType[] getAggregateTypes() {
+    return accTypes;
   }
 
   @SuppressWarnings("unchecked")
@@ -121,19 +130,12 @@ public class WindowAggOperator<IN, OUT, W> extends GlutenOneInputOperator<IN, OU
                   LogicalTypeConverter.toVLType(
                       new org.apache.flink.table.types.logical.RowType(accFields))),
               Map.of(windowStateName, new BigIntType()));
-      LOG.info("jobId:{}, {}", jobId, operartorId);
-      LOG.info(
-          "db:{}, read:{}, write:{}",
-          dbInstance.getNativeHandle(),
-          keyedStateBackend.getReadOptions().getNativeHandle(),
-          keyedStateBackend.getWriteOptions().getNativeHandle());
-      LOG.info("columnFaimlyed:{}", columnFamilyHandle.getNativeHandle());
-      LOG.info(
-          "keyType:{}, valueType:{}",
-          keyType.toLogicalType().asSummaryString(),
-          new org.apache.flink.table.types.logical.RowType(accFields).asSummaryString());
+      task.initializeState(0, parameters);
     }
   }
+
+  @Override
+  public void setCurrentKey(Object key) {}
 
   public void close() throws Exception {
     super.close();

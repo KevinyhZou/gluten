@@ -18,6 +18,7 @@ package org.apache.gluten.velox;
 
 import org.apache.gluten.streaming.api.operators.GlutenOneInputOperatorFactory;
 import org.apache.gluten.table.runtime.operators.GlutenOneInputOperator;
+import org.apache.gluten.table.runtime.operators.GlutenStreamingFileWriterOperator;
 import org.apache.gluten.util.LogicalTypeConverter;
 import org.apache.gluten.util.PlanNodeIdGenerator;
 import org.apache.gluten.util.ReflectUtils;
@@ -46,6 +47,12 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
+
+  private static final String PARTITION_COMMITTER_CLASS =
+      "org.apache.flink.connector.file.table.stream.PartitionCommitter";
+  private static final String ABSTRACT_STREAMING_WRITER_CLASS =
+      "org.apache.flink.connector.file.table.stream.AbstractStreamingWriter";
+  private static final String CONNECTOR_FILESYSTEM = "connector-filesystem";
 
   @SuppressWarnings("unchecked")
   @Override
@@ -84,17 +91,15 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
     OneInputTransformation<RowData, RowData> fileWriterTransformation =
         (OneInputTransformation<RowData, RowData>) partitionCommitTransformation.getInputs().get(0);
     OneInputStreamOperator<?, ?> operator = fileWriterTransformation.getOperator();
+    LOG.info("operator: {}", operator.getClass().getName());
     List<String> partitionKeys =
         (List<String>) ReflectUtils.getObjectField(operator.getClass(), operator, "partitionKeys");
-    Map<String, String> tableParams = new HashMap<>();
-    Configuration tableOptions =
-        (Configuration)
-            ReflectUtils.getObjectField(
-                "org.apache.flink.connector.file.table.stream.PartitionCommitter",
-                partitionCommitTransformation.getOperator(),
-                "conf");
-    tableParams.putAll(tableOptions.toMap());
-
+    Object partitionCommitter = partitionCommitTransformation.getOperator();
+    boolean isHiveConnector = isHiveConnector(partitionCommitter);
+    Map<String, String> tableParams =
+        buildTableParams(partitionCommitter, operator, isHiveConnector);
+    LOG.info("tableParams: {}", tableParams);
+    String sinkDescription = isHiveConnector ? "HiveInsertTable" : "FileSystemInsertTable";
     ResolvedSchema schema = (ResolvedSchema) parameters.get(ResolvedSchema.class.getName());
     List<String> columnList = schema.getColumnNames();
     List<Integer> partitionIndexes =
@@ -117,31 +122,30 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
             inputDataColumns,
             inputDataColumns.getNames(),
             null,
-            "connector-filesystem",
+            CONNECTOR_FILESYSTEM,
             insertTableHandle,
             false,
             ignore,
             CommitStrategy.NO_COMMIT,
             List.of(new EmptyNode(inputDataColumns)));
     GlutenOneInputOperator onewInputOperator =
-        new GlutenOneInputOperator(
+        new GlutenStreamingFileWriterOperator(
             new StatefulPlanNode(fileSystemWriteNode.getId(), fileSystemWriteNode),
             PlanNodeIdGenerator.newId(),
             inputDataColumns,
             Map.of(fileSystemWriteNode.getId(), ignore),
             RowData.class,
-            RowData.class,
-            "FileSystemInsertTable");
-    GlutenOneInputOperatorFactory<?, ?> operatorFactory =
-        new GlutenOneInputOperatorFactory(onewInputOperator);
-    Transformation<RowData> veloxFileWriterTransformation =
+            sinkDescription);
+    GlutenOneInputOperatorFactory<RowData, ?> operatorFactory =
+        new GlutenOneInputOperatorFactory<>(onewInputOperator);
+    OneInputTransformation<RowData, ?> veloxFileWriterTransformation =
         new OneInputTransformation(
             fileWriterTransformation.getInputs().get(0),
             fileWriterTransformation.getName(),
             operatorFactory,
             fileWriterTransformation.getOutputType(),
             fileWriterTransformation.getParallelism());
-    OneInputTransformation<RowData, RowData> newPartitionCommitTransformation =
+    OneInputTransformation<?, RowData> newPartitionCommitTransformation =
         new OneInputTransformation(
             veloxFileWriterTransformation,
             partitionCommitTransformation.getName(),
@@ -160,5 +164,154 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
         sinkTransformation.getParallelism(),
         sinkTransformation.isParallelismConfigured(),
         sinkTransformation.getSinkOperatorsUidHashes());
+  }
+
+  private static boolean isHiveConnector(Object partitionCommitter) {
+    Object metaStoreFactory =
+        ReflectUtils.getObjectField(
+            PARTITION_COMMITTER_CLASS, partitionCommitter, "metaStoreFactory");
+    return metaStoreFactory.getClass().getName().contains("Hive");
+  }
+
+  private static Map<String, String> buildTableParams(
+      Object partitionCommitter,
+      OneInputStreamOperator<?, ?> fileWriterOperator,
+      boolean isHiveConnector) {
+    Configuration tableOptions =
+        (Configuration)
+            ReflectUtils.getObjectField(PARTITION_COMMITTER_CLASS, partitionCommitter, "conf");
+    Map<String, String> tableParams = new HashMap<>(tableOptions.toMap());
+    if (isHiveConnector) {
+      enrichHiveTableParams(partitionCommitter, tableParams);
+    } else if (!tableParams.containsKey("path")) {
+      Object locationPath =
+          ReflectUtils.getObjectField(
+              PARTITION_COMMITTER_CLASS, partitionCommitter, "locationPath");
+      tableParams.put("path", locationPath.toString());
+    }
+    tableParams.putIfAbsent("format", resolveWriteFormat(fileWriterOperator, isHiveConnector));
+    tableParams.put("connector", isHiveConnector ? "hive" : "filesystem");
+    return tableParams;
+  }
+
+  private static void enrichHiveTableParams(
+      Object partitionCommitter, Map<String, String> tableParams) {
+    Object locationPath =
+        ReflectUtils.getObjectField(PARTITION_COMMITTER_CLASS, partitionCommitter, "locationPath");
+    tableParams.put("path", locationPath.toString());
+  }
+
+  private static String resolveWriteFormat(
+      OneInputStreamOperator<?, ?> fileWriterOperator, boolean isHiveConnector) {
+    Object bucketsBuilder =
+        ReflectUtils.getObjectField(
+            ABSTRACT_STREAMING_WRITER_CLASS, fileWriterOperator, "bucketsBuilder");
+    String format = resolveFormatFromBucketsBuilder(bucketsBuilder);
+    if (format != null) {
+      return format;
+    }
+    return isHiveConnector ? "hive" : "unknown";
+  }
+
+  private static String resolveFormatFromBucketsBuilder(Object bucketsBuilder) {
+    Class<?> builderClass = bucketsBuilder.getClass();
+    String builderName = builderClass.getName();
+    if (builderName.contains("HadoopPathBasedBulkFormatBuilder")) {
+      Object writerFactory =
+          ReflectUtils.getObjectField(builderClass, bucketsBuilder, "writerFactory");
+      return resolveFormatFromHadoopBulkWriterFactory(writerFactory);
+    }
+    if (builderName.contains("BulkFormatBuilder")) {
+      Object writerFactory =
+          ReflectUtils.getObjectField(builderClass, bucketsBuilder, "writerFactory");
+      return resolveFormatFromBulkWriterFactory(writerFactory);
+    }
+    if (builderName.contains("RowFormatBuilder")) {
+      Object encoder = ReflectUtils.getObjectField(builderClass, bucketsBuilder, "encoder");
+      return inferFormatFromClassName(encoder.getClass().getName());
+    }
+    return inferFormatFromClassName(builderName);
+  }
+
+  private static String resolveFormatFromHadoopBulkWriterFactory(Object writerFactory) {
+    Class<?> factoryClass = writerFactory.getClass();
+    if (factoryClass.getName().contains("HiveBulkWriterFactory")) {
+      Object hiveWriterFactory =
+          ReflectUtils.getObjectField(factoryClass, writerFactory, "factory");
+      return resolveFormatFromHiveWriterFactory(hiveWriterFactory);
+    }
+    return inferFormatFromClassName(factoryClass.getName());
+  }
+
+  private static String resolveFormatFromHiveWriterFactory(Object hiveWriterFactory) {
+    Class<?> factoryClass = hiveWriterFactory.getClass();
+    Object serDeInfoCached =
+        ReflectUtils.getObjectField(factoryClass, hiveWriterFactory, "serDeInfo");
+    Object serDeInfo =
+        ReflectUtils.invokeObjectMethod(
+            serDeInfoCached.getClass(),
+            serDeInfoCached,
+            "deserializeValue",
+            new Class<?>[] {},
+            new Object[] {});
+    String serializationLib =
+        (String)
+            ReflectUtils.invokeObjectMethod(
+                serDeInfo.getClass(),
+                serDeInfo,
+                "getSerializationLib",
+                new Class<?>[] {},
+                new Object[] {});
+    String format = inferFormatFromClassName(serializationLib);
+    if (format != null) {
+      return format;
+    }
+    Class<?> outputFormatClz =
+        (Class<?>)
+            ReflectUtils.getObjectField(factoryClass, hiveWriterFactory, "hiveOutputFormatClz");
+    return inferFormatFromClassName(outputFormatClz.getName());
+  }
+
+  private static String resolveFormatFromBulkWriterFactory(Object writerFactory) {
+    String format = inferFormatFromClassName(writerFactory.getClass().getName());
+    if (format != null) {
+      return format;
+    }
+    Object innerFactory = tryGetObjectField(writerFactory.getClass(), writerFactory, "factory");
+    if (innerFactory != null) {
+      format = inferFormatFromClassName(innerFactory.getClass().getName());
+      if (format != null) {
+        return format;
+      }
+    }
+    return null;
+  }
+
+  private static Object tryGetObjectField(Class<?> clazz, Object obj, String fieldName) {
+    try {
+      return ReflectUtils.getObjectField(clazz, obj, fieldName);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static String inferFormatFromClassName(String className) {
+    String lower = className.toLowerCase();
+    if (lower.contains("parquet")) {
+      return "parquet";
+    }
+    if (lower.contains("orc")) {
+      return "orc";
+    }
+    if (lower.contains("avro")) {
+      return "avro";
+    }
+    if (lower.contains("json")) {
+      return "json";
+    }
+    if (lower.contains("csv")) {
+      return "csv";
+    }
+    return null;
   }
 }

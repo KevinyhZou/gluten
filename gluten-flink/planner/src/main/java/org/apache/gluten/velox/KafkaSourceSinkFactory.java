@@ -24,11 +24,8 @@ import org.apache.gluten.util.ReflectUtils;
 
 import io.github.zhztheplayer.velox4j.connector.KafkaConnectorSplit;
 import io.github.zhztheplayer.velox4j.connector.KafkaTableHandle;
-import io.github.zhztheplayer.velox4j.plan.PlanNode;
 import io.github.zhztheplayer.velox4j.plan.StatefulPlanNode;
 import io.github.zhztheplayer.velox4j.plan.TableScanNode;
-import io.github.zhztheplayer.velox4j.plan.TableScanWithWatermarkNode;
-import io.github.zhztheplayer.velox4j.plan.WatermarkPushDownSpec;
 import io.github.zhztheplayer.velox4j.type.RowType;
 
 import org.apache.flink.api.connector.source.Source;
@@ -44,7 +41,6 @@ import org.apache.flink.util.FlinkRuntimeException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -72,8 +68,6 @@ public class KafkaSourceSinkFactory implements VeloxSourceSinkFactory {
       ScanTableSource tableSource =
           (ScanTableSource) parameters.get(ScanTableSource.class.getName());
       boolean checkpointEnabled = (Boolean) parameters.get("checkpoint.enabled");
-      Optional<WatermarkPushDownSpec> watermarkPushDownSpec =
-          (Optional<WatermarkPushDownSpec>) parameters.get("watermarkPushDownSpec");
       Class<?> tableSourceClazz =
           Class.forName("org.apache.flink.streaming.connectors.kafka.table.KafkaDynamicSource");
       Properties properties =
@@ -118,12 +112,7 @@ public class KafkaSourceSinkFactory implements VeloxSourceSinkFactory {
               Boolean.valueOf(kafkaTableParameters.getOrDefault("enable.auto.commit", "false")),
               "latest",
               List.of());
-
-      PlanNode kafkaScan =
-          watermarkPushDownSpec.isPresent()
-              ? new TableScanWithWatermarkNode(
-                  planId, outputType, kafkaTableHandle, List.of(), watermarkPushDownSpec.get())
-              : new TableScanNode(planId, outputType, kafkaTableHandle, List.of());
+      TableScanNode kafkaScan = new TableScanNode(planId, outputType, kafkaTableHandle, List.of());
       GlutenStreamSource sourceOp =
           new GlutenStreamSource(
               new GlutenSourceFunction(

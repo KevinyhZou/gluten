@@ -17,6 +17,7 @@
 package org.apache.flink.table.planner.plan.nodes.exec.stream;
 
 import org.apache.gluten.streaming.api.operators.GlutenOperator;
+import org.apache.gluten.streaming.runtime.partitioner.GlutenKeyGroupStreamPartitioner;
 import org.apache.gluten.table.runtime.keyselector.GlutenKeySelector;
 import org.apache.gluten.table.runtime.operators.GlutenOneInputOperator;
 import org.apache.gluten.util.LogicalTypeConverter;
@@ -179,9 +180,8 @@ public class StreamExecExchange extends CommonExecExchange implements StreamExec
                   inputTransform.getOutputType(),
                   parallelism,
                   false);
-          partitioner = null;
-          //    new GlutenKeyGroupStreamPartitioner(keySelector,
-          // DEFAULT_LOWER_BOUND_MAX_PARALLELISM);
+          partitioner =
+              new GlutenKeyGroupStreamPartitioner(keySelector, DEFAULT_LOWER_BOUND_MAX_PARALLELISM);
         } else {
           parallelism = ExecutionConfig.PARALLELISM_DEFAULT;
           partitioner =

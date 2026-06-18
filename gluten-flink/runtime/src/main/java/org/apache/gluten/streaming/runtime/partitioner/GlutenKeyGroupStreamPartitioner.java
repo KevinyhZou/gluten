@@ -39,17 +39,16 @@ import java.util.Objects;
 public class GlutenKeyGroupStreamPartitioner extends StreamPartitioner<StatefulRecord>
     implements ConfigurableStreamPartitioner {
   private static final long serialVersionUID = 1L;
+
   private final KeySelector<StatefulRecord, Integer> keySelector;
 
   private int maxParallelism;
-  private int parallelism;
 
   public GlutenKeyGroupStreamPartitioner(
-      KeySelector<StatefulRecord, Integer> keySelector, int maxParallelism, int parallelism) {
+      KeySelector<StatefulRecord, Integer> keySelector, int maxParallelism) {
     Preconditions.checkArgument(maxParallelism > 0, "Number of key-groups must be > 0!");
     this.keySelector = Preconditions.checkNotNull(keySelector);
     this.maxParallelism = maxParallelism;
-    this.parallelism = parallelism;
   }
 
   public int getMaxParallelism() {
@@ -59,10 +58,8 @@ public class GlutenKeyGroupStreamPartitioner extends StreamPartitioner<StatefulR
   @Override
   public int selectChannel(SerializationDelegate<StreamRecord<StatefulRecord>> record) {
     try {
-      int key = keySelector.getKey(record.getInstance().getValue());
-      int keyGroup = KeyGroupRangeAssignment.assignToKeyGroup(key, maxParallelism);
-      return KeyGroupRangeAssignment.computeOperatorIndexForKeyGroup(
-          maxParallelism, parallelism, keyGroup);
+      int channel = keySelector.getKey(record.getInstance().getValue());
+      return channel;
     } catch (Exception e) {
       throw new RuntimeException(
           "Could not extract key from " + record.getInstance().getValue(), e);

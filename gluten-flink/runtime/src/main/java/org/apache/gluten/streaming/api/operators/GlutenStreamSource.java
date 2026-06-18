@@ -90,18 +90,6 @@ public class GlutenStreamSource extends StreamSource implements GlutenOperator {
   public void notifyCheckpointComplete(long checkpointId) throws Exception {
     super.notifyCheckpointComplete(checkpointId);
     sourceFunction.notifyCheckpointComplete(checkpointId);
-    // SourceFunction.SourceContext sourceContext = getSourceContext();
-    // TaskInfo taskInfo = getRuntimeContext().getTaskInfo();
-    // if (sourceContext != null
-    //     && committed != null
-    //     && taskInfo.getTaskName().contains("StreamingFileWriter")) {
-    //   sourceContext.collect(
-    //       Utils.constructCommitInfo(
-    //           checkpointId,
-    //           taskInfo.getIndexOfThisSubtask(),
-    //           taskInfo.getNumberOfParallelSubtasks(),
-    //           committed));
-    // }
   }
 
   @Override

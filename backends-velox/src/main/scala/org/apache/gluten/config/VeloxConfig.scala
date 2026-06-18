@@ -65,6 +65,9 @@ class VeloxConfig(conf: SQLConf) extends GlutenConfig(conf) {
   def enableBroadcastBuildRelationInOffheap: Boolean =
     getConf(VELOX_BROADCAST_BUILD_RELATION_USE_OFFHEAP)
 
+  def broadcastBuildMergeBatches: Boolean =
+    getConf(VELOX_BROADCAST_BUILD_MERGE_BATCHES)
+
   def enableBroadcastBuildOncePerExecutor: Boolean =
     getConf(VELOX_BROADCAST_BUILD_HASHTABLE_ONCE_PER_EXECUTOR)
 
@@ -617,6 +620,17 @@ object VeloxConfig extends ConfigRegistry {
       .booleanConf
       .createWithDefault(false)
 
+  val VELOX_BROADCAST_BUILD_MERGE_BATCHES =
+    buildConf("spark.gluten.velox.broadcastBuild.mergeBatches")
+      .doc(
+        "If enabled, all columnar batches in a broadcast build relation will be " +
+          "serialized into a single buffer to reduce the number of addInput calls in " +
+          "HashBuild operator. This can significantly improve BHJ performance when " +
+          "the broadcast table has many small batches, but may increase driver-side " +
+          "peak memory and is not suitable for very large broadcasts.")
+      .booleanConf
+      .createWithDefault(false)
+
   val VELOX_HASHMAP_ABANDON_BUILD_DUPHASH_MIN_ROWS =
     buildConf("spark.gluten.velox.abandonDedupHashMap.minRows")
       .experimental()
@@ -824,9 +838,9 @@ object VeloxConfig extends ConfigRegistry {
   val ENABLE_TIMESTAMP_NTZ_VALIDATION =
     buildConf("spark.gluten.sql.columnar.backend.velox.enableTimestampNtzValidation")
       .doc(
-        "Enable validation fallback for TimestampNTZ type. When true (default), any plan " +
-          "containing TimestampNTZ will fall back to Spark execution. Set to false during " +
-          "development/testing of TimestampNTZ support to allow native execution.")
+        "Enable validation fallback for TimestampNTZ type. When true, any plan " +
+          "containing TimestampNTZ will fall back to Spark execution. When false, " +
+          "allows native execution for TimestampNTZ scan.")
       .booleanConf
-      .createWithDefault(true)
+      .createWithDefault(false)
 }

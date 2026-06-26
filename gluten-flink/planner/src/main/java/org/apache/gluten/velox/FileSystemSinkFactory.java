@@ -39,7 +39,6 @@ import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.streaming.api.transformations.SinkTransformation;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import java.util.HashMap;
 import java.util.List;
@@ -89,7 +88,7 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
         partitionKeys.stream().mapToInt(columnList::indexOf).boxed().collect(Collectors.toList());
     org.apache.flink.table.types.logical.RowType inputType =
         (org.apache.flink.table.types.logical.RowType)
-            ((InternalTypeInfo<?>) fileWriterTransformation.getInputType()).toLogicalType();
+            schema.toPhysicalRowDataType().getLogicalType();
     RowType inputDataColumns = (RowType) LogicalTypeConverter.toVLType(inputType);
     FileSystemInsertTableHandle insertTableHandle =
         new FileSystemInsertTableHandle(

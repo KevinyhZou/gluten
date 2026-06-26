@@ -39,6 +39,7 @@ public class VeloxConnectorConfig {
           "connector-print");
   private static final String keyTaskIndex = "task_index";
   private static final String keyParallelism = "parallelism";
+  private static final String keyTaskParallelism = "task_parallelism";
   private static final String keyQueryUUId = "query_uuid";
 
   public static ConnectorConfig getConfig(RuntimeContext context) {
@@ -46,6 +47,7 @@ public class VeloxConnectorConfig {
     TaskInfo taskInfo = context.getTaskInfo();
     configMap.put(keyTaskIndex, String.valueOf(taskInfo.getIndexOfThisSubtask()));
     configMap.put(keyParallelism, String.valueOf(taskInfo.getNumberOfParallelSubtasks()));
+    configMap.put(keyTaskParallelism, String.valueOf(taskInfo.getNumberOfParallelSubtasks()));
     configMap.put(
         keyQueryUUId,
         UUID.nameUUIDFromBytes(context.getJobInfo().getJobId().toHexString().getBytes())

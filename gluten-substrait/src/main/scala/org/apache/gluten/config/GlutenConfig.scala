@@ -630,10 +630,8 @@ object GlutenConfig extends ConfigRegistry {
       (SPARK_S3_CONNECTION_MAXIMUM, "15"),
       ("spark.gluten.velox.fs.s3a.retry.mode", "legacy"),
       (
-        "spark.gluten.sql.columnar.backend.velox.IOThreads",
-        conf.getOrElse(
-          GlutenCoreConfig.NUM_TASK_SLOTS_PER_EXECUTOR.key,
-          GlutenCoreConfig.NUM_TASK_SLOTS_PER_EXECUTOR.defaultValueString)),
+        GlutenCoreConfig.NUM_TASK_SLOTS_PER_EXECUTOR.key,
+        GlutenCoreConfig.NUM_TASK_SLOTS_PER_EXECUTOR.defaultValueString),
       (COLUMNAR_SHUFFLE_CODEC.key, ""),
       (COLUMNAR_SHUFFLE_CODEC_BACKEND.key, ""),
       (DEBUG_CUDF.key, DEBUG_CUDF.defaultValueString),
@@ -654,6 +652,7 @@ object GlutenConfig extends ConfigRegistry {
       DEBUG_ENABLED.key,
       // datasource config
       SPARK_SQL_PARQUET_COMPRESSION_CODEC,
+      SQLConf.PARQUET_WRITE_LEGACY_FORMAT.key,
       // datasource config end
       GlutenCoreConfig.COLUMNAR_OVERHEAD_SIZE_IN_BYTES.key,
       GlutenCoreConfig.COLUMNAR_OFFHEAP_SIZE_IN_BYTES.key,

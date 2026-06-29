@@ -51,6 +51,8 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
       "org.apache.flink.connector.file.table.stream.PartitionCommitter";
   protected static final String ABSTRACT_STREAMING_WRITER_CLASS =
       "org.apache.flink.connector.file.table.stream.AbstractStreamingWriter";
+  private static final String HIVE_TABLE_META_STORE_FACTORY_CLASS =
+      "org.apache.flink.connectors.hive.HiveTableMetaStoreFactory";
   private static final String CONNECTOR_FILESYSTEM = "connector-filesystem";
 
   @Override
@@ -58,7 +60,7 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
     if (!isFileSystemSinkTransformation(transformation)) {
       return false;
     }
-    return !isHiveConnector(getPartitionCommitter(transformation));
+    return !isHiveConnector(transformation);
   }
 
   @Override
@@ -80,7 +82,8 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
     OneInputStreamOperator<?, ?> operator = fileWriterTransformation.getOperator();
     List<String> partitionKeys =
         (List<String>) ReflectUtils.getObjectField(operator.getClass(), operator, "partitionKeys");
-    Object partitionCommitter = partitionCommitTransformation.getOperator();
+    Object partitionCommitter =
+        partitionCommitTransformation == null ? null : partitionCommitTransformation.getOperator();
     Map<String, String> tableParams = buildTableParams(partitionCommitter, operator);
     ResolvedSchema schema = (ResolvedSchema) parameters.get(ResolvedSchema.class.getName());
     List<String> columnList = schema.getColumnNames();
@@ -127,17 +130,22 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
             operatorFactory,
             fileWriterTransformation.getOutputType(),
             fileWriterTransformation.getParallelism());
-    OneInputTransformation<?, RowData> newPartitionCommitTransformation =
-        new OneInputTransformation(
-            veloxFileWriterTransformation,
-            partitionCommitTransformation.getName(),
-            partitionCommitTransformation.getOperatorFactory(),
-            partitionCommitTransformation.getOutputType(),
-            partitionCommitTransformation.getParallelism());
+    Transformation<?> newSinkInputTransformation;
+    if (partitionCommitTransformation == null) {
+      newSinkInputTransformation = veloxFileWriterTransformation;
+    } else {
+      newSinkInputTransformation =
+          new OneInputTransformation(
+              veloxFileWriterTransformation,
+              partitionCommitTransformation.getName(),
+              partitionCommitTransformation.getOperatorFactory(),
+              partitionCommitTransformation.getOutputType(),
+              partitionCommitTransformation.getParallelism());
+    }
     DataStream<RowData> newInputStream =
         new DataStream<RowData>(
             sinkTransformation.getInputStream().getExecutionEnvironment(),
-            newPartitionCommitTransformation);
+            (Transformation<RowData>) newSinkInputTransformation);
     return new SinkTransformation<RowData, RowData>(
         newInputStream,
         sinkTransformation.getSink(),
@@ -155,13 +163,17 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
           (SinkTransformation<RowData, RowData>) transformation;
       Transformation<RowData> inputTransformation =
           (Transformation<RowData>) sinkTransformation.getInputs().get(0);
-      if (inputTransformation instanceof OneInputTransformation
-          && inputTransformation.getName().equals("PartitionCommitter")) {
-        OneInputTransformation<RowData, RowData> oneInputTransformatin =
-            (OneInputTransformation<RowData, RowData>) inputTransformation;
-        Transformation<RowData> preInputTransformation =
-            (Transformation<RowData>) oneInputTransformatin.getInputs().get(0);
-        return preInputTransformation.getName().equals("StreamingFileWriter");
+      if (inputTransformation instanceof OneInputTransformation) {
+        if (inputTransformation.getName().equals("StreamingFileWriter")) {
+          return true;
+        }
+        if (inputTransformation.getName().equals("PartitionCommitter")) {
+          OneInputTransformation<RowData, RowData> oneInputTransformation =
+              (OneInputTransformation<RowData, RowData>) inputTransformation;
+          Transformation<RowData> preInputTransformation =
+              (Transformation<RowData>) oneInputTransformation.getInputs().get(0);
+          return preInputTransformation.getName().equals("StreamingFileWriter");
+        }
       }
     }
     return false;
@@ -172,34 +184,60 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
       Transformation<RowData> transformation) {
     SinkTransformation<RowData, RowData> sinkTransformation =
         (SinkTransformation<RowData, RowData>) transformation;
-    return (OneInputTransformation<RowData, RowData>) sinkTransformation.getInputs().get(0);
+    Transformation<RowData> inputTransformation =
+        (Transformation<RowData>) sinkTransformation.getInputs().get(0);
+    if (inputTransformation.getName().equals("PartitionCommitter")) {
+      return (OneInputTransformation<RowData, RowData>) inputTransformation;
+    }
+    return null;
   }
 
   @SuppressWarnings("unchecked")
   protected OneInputTransformation<RowData, RowData> getFileWriterTransformation(
       Transformation<RowData> transformation) {
-    return (OneInputTransformation<RowData, RowData>)
-        getPartitionCommitTransformation(transformation).getInputs().get(0);
+    OneInputTransformation<RowData, RowData> partitionCommitTransformation =
+        getPartitionCommitTransformation(transformation);
+    if (partitionCommitTransformation != null) {
+      return (OneInputTransformation<RowData, RowData>)
+          partitionCommitTransformation.getInputs().get(0);
+    }
+    SinkTransformation<RowData, RowData> sinkTransformation =
+        (SinkTransformation<RowData, RowData>) transformation;
+    return (OneInputTransformation<RowData, RowData>) sinkTransformation.getInputs().get(0);
   }
 
   protected Object getPartitionCommitter(Transformation<RowData> transformation) {
-    return getPartitionCommitTransformation(transformation).getOperator();
+    OneInputTransformation<RowData, RowData> partitionCommitTransformation =
+        getPartitionCommitTransformation(transformation);
+    return partitionCommitTransformation == null
+        ? null
+        : partitionCommitTransformation.getOperator();
+  }
+
+  protected boolean isHiveConnector(Transformation<RowData> transformation) {
+    Object partitionCommitter = getPartitionCommitter(transformation);
+    if (partitionCommitter != null) {
+      return isHiveConnector(partitionCommitter);
+    }
+    return "hive"
+        .equals(
+            getTableOptions(getFileWriterTransformation(transformation).getOperator())
+                .toMap()
+                .get("connector"));
   }
 
   protected boolean isHiveConnector(Object partitionCommitter) {
     Object metaStoreFactory =
         ReflectUtils.getObjectField(
             PARTITION_COMMITTER_CLASS, partitionCommitter, "metaStoreFactory");
-    return metaStoreFactory.getClass().getName().contains("Hive");
+    return HIVE_TABLE_META_STORE_FACTORY_CLASS.equals(metaStoreFactory.getClass().getName());
   }
 
   protected Map<String, String> buildTableParams(
       Object partitionCommitter, OneInputStreamOperator<?, ?> fileWriterOperator) {
-    Configuration tableOptions =
-        (Configuration)
-            ReflectUtils.getObjectField(PARTITION_COMMITTER_CLASS, partitionCommitter, "conf");
+    Configuration tableOptions = getTableOptions(partitionCommitter, fileWriterOperator);
     Map<String, String> tableParams = new HashMap<>(tableOptions.toMap());
-    tableParams.putIfAbsent("path", getLocationPath(partitionCommitter));
+    tableParams.putIfAbsent("path", getLocationPath(partitionCommitter, fileWriterOperator));
     tableParams.putIfAbsent("format", resolveWriteFormat(fileWriterOperator));
     tableParams.put("connector", "filesystem");
     return tableParams;
@@ -213,10 +251,33 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
     return "unknown";
   }
 
-  protected String getLocationPath(Object partitionCommitter) {
-    Object locationPath =
-        ReflectUtils.getObjectField(PARTITION_COMMITTER_CLASS, partitionCommitter, "locationPath");
-    return locationPath.toString();
+  protected Configuration getTableOptions(OneInputStreamOperator<?, ?> fileWriterOperator) {
+    return (Configuration)
+        ReflectUtils.getObjectField(fileWriterOperator.getClass(), fileWriterOperator, "conf");
+  }
+
+  protected Configuration getTableOptions(
+      Object partitionCommitter, OneInputStreamOperator<?, ?> fileWriterOperator) {
+    if (partitionCommitter != null) {
+      return (Configuration)
+          ReflectUtils.getObjectField(PARTITION_COMMITTER_CLASS, partitionCommitter, "conf");
+    }
+    return getTableOptions(fileWriterOperator);
+  }
+
+  protected String getLocationPath(
+      Object partitionCommitter, OneInputStreamOperator<?, ?> fileWriterOperator) {
+    if (partitionCommitter != null) {
+      Object locationPath =
+          ReflectUtils.getObjectField(
+              PARTITION_COMMITTER_CLASS, partitionCommitter, "locationPath");
+      return locationPath.toString();
+    }
+    Object bucketsBuilder =
+        ReflectUtils.getObjectField(
+            ABSTRACT_STREAMING_WRITER_CLASS, fileWriterOperator, "bucketsBuilder");
+    Object basePath = ReflectUtils.tryGetObjectField(bucketsBuilder, "basePath");
+    return basePath.toString();
   }
 
   protected String resolveWriteFormat(OneInputStreamOperator<?, ?> fileWriterOperator) {
@@ -234,21 +295,21 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
     Class<?> builderClass = bucketsBuilder.getClass();
     String builderName = builderClass.getName();
     if (builderName.contains("HadoopPathBasedBulkFormatBuilder")) {
-      Object writerFactory = tryGetObjectField(builderClass, bucketsBuilder, "writerFactory");
+      Object writerFactory = ReflectUtils.tryGetObjectField(bucketsBuilder, "writerFactory");
       if (writerFactory != null) {
         return resolveFormatFromHadoopBulkWriterFactory(writerFactory);
       }
       return inferFormatFromClassName(builderName);
     }
     if (builderName.contains("BulkFormatBuilder")) {
-      Object writerFactory = tryGetObjectField(builderClass, bucketsBuilder, "writerFactory");
+      Object writerFactory = ReflectUtils.tryGetObjectField(bucketsBuilder, "writerFactory");
       if (writerFactory != null) {
         return resolveFormatFromBulkWriterFactory(writerFactory);
       }
       return inferFormatFromClassName(builderName);
     }
     if (builderName.contains("RowFormatBuilder")) {
-      Object encoder = tryGetObjectField(builderClass, bucketsBuilder, "encoder");
+      Object encoder = ReflectUtils.tryGetObjectField(bucketsBuilder, "encoder");
       if (encoder != null) {
         return inferFormatFromClassName(encoder.getClass().getName());
       }
@@ -265,7 +326,8 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
     if (format != null) {
       return format;
     }
-    Object innerFactory = tryGetObjectField(writerFactory.getClass(), writerFactory, "factory");
+    Object innerFactory =
+        ReflectUtils.tryGetObjectField(writerFactory.getClass(), writerFactory, "factory");
     if (innerFactory != null) {
       format = inferFormatFromClassName(innerFactory.getClass().getName());
       if (format != null) {
@@ -273,14 +335,6 @@ public class FileSystemSinkFactory implements VeloxSourceSinkFactory {
       }
     }
     return null;
-  }
-
-  protected Object tryGetObjectField(Class<?> clazz, Object obj, String fieldName) {
-    try {
-      return ReflectUtils.getObjectField(clazz, obj, fieldName);
-    } catch (Exception e) {
-      return null;
-    }
   }
 
   protected String inferFormatFromClassName(String className) {

@@ -33,17 +33,15 @@ public class HiveSourceSinkFactory extends FileSystemSinkFactory {
     if (!isFileSystemSinkTransformation(transformation)) {
       return false;
     }
-    return isHiveConnector(getPartitionCommitter(transformation));
+    return isHiveConnector(transformation);
   }
 
   @Override
   protected Map<String, String> buildTableParams(
       Object partitionCommitter, OneInputStreamOperator<?, ?> fileWriterOperator) {
-    Configuration tableOptions =
-        (Configuration)
-            ReflectUtils.getObjectField(PARTITION_COMMITTER_CLASS, partitionCommitter, "conf");
+    Configuration tableOptions = getTableOptions(partitionCommitter, fileWriterOperator);
     Map<String, String> tableParams = new HashMap<>(tableOptions.toMap());
-    tableParams.put("path", getLocationPath(partitionCommitter));
+    tableParams.put("path", getLocationPath(partitionCommitter, fileWriterOperator));
     tableParams.putIfAbsent("format", resolveWriteFormat(fileWriterOperator));
     tableParams.put("connector", "hive");
     return tableParams;

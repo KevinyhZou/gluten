@@ -146,7 +146,7 @@ public interface VectorOutputBridge<OUT> extends Serializable {
   class PartitionCommitInfoOutputBridge implements VectorOutputBridge<PartitionCommitInfo> {
 
     @Override
-    public void collect(
+    public long collect(
         Output<StreamRecord<PartitionCommitInfo>> collector,
         StatefulRecord record,
         BufferAllocator allocator,

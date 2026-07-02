@@ -216,6 +216,7 @@ public class GlutenSourceFunction<OUT> extends RichParallelSourceFunction<OUT>
     checkpointState.clear();
     String[] checkpointRecords = this.task.snapshotState(context.getCheckpointId());
     for (String checkpointRecord : checkpointRecords) {
+      LOG.info("Adding checkpoint record: {}", checkpointRecord);
       checkpointState.add(checkpointRecord);
     }
   }
@@ -235,6 +236,11 @@ public class GlutenSourceFunction<OUT> extends RichParallelSourceFunction<OUT>
       restoredCheckpointRecords = records.toArray(new String[0]);
     }
     initSession();
+    if (restoredCheckpointRecords != null) {
+      for (String checkpointRecord : restoredCheckpointRecords) {
+        LOG.info("Restoring checkpoint record: {}", checkpointRecord);
+      }
+    }
     this.task.initializeState(0, null, restoredCheckpointRecords);
   }
 

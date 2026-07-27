@@ -80,6 +80,9 @@ public class PulsarSourceSinkFactory implements VeloxSourceSinkFactory {
       String serviceUrl = required(pulsarTableParameters, "service.url");
       String subscriptionName = required(pulsarTableParameters, "subscription.name");
       String format = pulsarTableParameters.getOrDefault("format", "raw");
+      pulsarTableParameters.put(
+          "checkpoint.enabled",
+          String.valueOf(parameters.getOrDefault("checkpoint.enabled", "false")));
 
       String planId = PlanNodeIdGenerator.newId();
       PulsarTableHandle pulsarTableHandle =

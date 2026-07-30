@@ -55,7 +55,7 @@ class PulsarSourceSinkFactoryTest {
   void tableParametersMapFlinkSqlOptionsToVeloxPulsarOptions() {
     PulsarSource source = new PulsarSource();
     source.options.put("pulsar.client.serviceUrl", "pulsar://127.0.0.1:16650");
-    source.options.put("admin-url", "http://127.0.0.1:18080");
+    source.options.put("pulsar.source.adminUrl", "http://127.0.0.1:18080");
     source.options.put("topics", "persistent://public/default/gluten-pulsar-smoke");
     source.options.put("pulsar.consumer.subscriptionName", "gluten-test-sub");
     source.options.put("format", "raw");

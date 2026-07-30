@@ -128,9 +128,10 @@ public class PulsarSourceSinkFactory implements VeloxSourceSinkFactory {
     option(options, "service-url", "pulsar.service.url", "service.url", "pulsar.client.serviceUrl")
         .ifPresent(value -> options.put("service.url", value));
 
-    firstString(tableSource, source, "adminUrl", "adminURL", "pulsarAdminUrl")
+    firstString(
+            tableSource, source, "adminUrl", "adminURL", "pulsarAdminUrl", "pulsar.source.adminUrl")
         .ifPresent(value -> options.put("admin.url", value));
-    option(options, "admin-url", "pulsar.admin.url", "admin.url")
+    option(options, "admin-url", "pulsar.admin.url", "admin.url", "pulsar.source.adminUrl")
         .ifPresent(value -> options.put("admin.url", value));
 
     firstTopic(tableSource, source).ifPresent(value -> options.put("topic", value));

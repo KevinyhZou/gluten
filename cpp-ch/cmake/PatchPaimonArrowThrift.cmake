@@ -20,6 +20,39 @@
 set(_toolchain "${PAIMON_SOURCE_DIR}/cmake_modules/ThirdpartyToolchain.cmake")
 file(READ "${_toolchain}" _contents)
 set(_original_contents "${_contents}")
+# The CI builder has git but does not provide the patch utility. The bundled
+# diffs need --recount, and our Arrow diff has no context lines.
+set(_patch_command "patch -s -N -p1 -i")
+string(FIND "${_contents}" "${_patch_command}" _patch_position)
+if(NOT _patch_position EQUAL -1)
+  string(REPLACE "${_patch_command}"
+                 "git apply --unidiff-zero --recount -p1 --" _contents
+                 "${_contents}")
+elseif(_contents MATCHES "git apply --recount -p1 --")
+  string(REPLACE "git apply --recount -p1 --"
+                 "git apply --unidiff-zero --recount -p1 --" _contents
+                 "${_contents}")
+elseif(NOT _contents MATCHES "git apply --unidiff-zero --recount -p1 --")
+  message(
+    FATAL_ERROR
+      "Cannot replace Paimon dependency patch command: ${_toolchain} changed")
+endif()
+# The upstream Arrow diff relies on GNU patch's fuzzy matching. Use an
+# equivalent diff against the pinned Arrow 17.0.0 source for git apply.
+set(_arrow_patch "${CMAKE_CURRENT_LIST_DIR}/PaimonArrowGitApply.patch")
+if(NOT EXISTS "${_arrow_patch}")
+  message(FATAL_ERROR "Missing Paimon Arrow patch: ${_arrow_patch}")
+endif()
+set(_arrow_patch_anchor
+    "set(PATCH_FILE \"\${CMAKE_CURRENT_LIST_DIR}/arrow.diff\")")
+string(FIND "${_contents}" "${_arrow_patch_anchor}" _arrow_patch_position)
+if(NOT _arrow_patch_position EQUAL -1)
+  string(REPLACE "${_arrow_patch_anchor}" "set(PATCH_FILE \"${_arrow_patch}\")"
+                 _contents "${_contents}")
+elseif(NOT _contents MATCHES "PaimonArrowGitApply.patch")
+  message(
+    FATAL_ERROR "Cannot replace Paimon Arrow patch: ${_toolchain} changed")
+endif()
 if(NOT _contents MATCHES "-DThrift_SOURCE=BUNDLED")
   set(_anchor "        -DARROW_DEPENDENCY_USE_SHARED=OFF")
   set(_replacement "        -DThrift_SOURCE=BUNDLED\n${_anchor}")

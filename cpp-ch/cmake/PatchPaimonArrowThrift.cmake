@@ -37,6 +37,16 @@ elseif(NOT _contents MATCHES "git apply --unidiff-zero --recount -p1 --")
     FATAL_ERROR
       "Cannot replace Paimon dependency patch command: ${_toolchain} changed")
 endif()
+# Dependency archives have no .git directory. Stop Git from discovering the
+# parent Gluten repository, where git apply silently skips dependency paths.
+# Check the patch itself instead of trusting .patched markers from earlier builds.
+set(_old_patch_step
+    "[ -f .patched ] && echo '<SOURCE_DIR> patch already applied, ignore...' || git apply --unidiff-zero --recount -p1 -- '\${PATCH_FILE}' && touch .patched")
+set(_isolated_git_apply
+    "env GIT_CEILING_DIRECTORIES='<SOURCE_DIR>/..' git apply --unidiff-zero --recount -p1")
+set(_new_patch_step
+    "${_isolated_git_apply} --reverse --check -- '\${PATCH_FILE}' > /dev/null 2>&1 || ${_isolated_git_apply} -- '\${PATCH_FILE}'")
+string(REPLACE "${_old_patch_step}" "${_new_patch_step}" _contents "${_contents}")
 # The upstream Arrow diff relies on GNU patch's fuzzy matching. Use an
 # equivalent diff against the pinned Arrow 17.0.0 source for git apply.
 set(_arrow_patch "${CMAKE_CURRENT_LIST_DIR}/PaimonArrowGitApply.patch")
@@ -65,7 +75,9 @@ if(NOT _contents MATCHES "-DThrift_SOURCE=BUNDLED")
   endif()
   string(REPLACE "${_anchor}" "${_replacement}" _contents "${_contents}")
 endif()
-if(NOT _contents MATCHES "-DWITH_UNWIND=none")
+# Paimon already adds WITH_UNWIND conditionally when no library is found.
+# LLVM libunwind is present here, but glog must not select the system GNU ABI.
+if(NOT _contents MATCHES "-DWITH_UNWIND=none[ \n]+-DWITH_GFLAGS=OFF")
   set(_anchor "        -DWITH_GFLAGS=OFF")
   set(_replacement "        -DWITH_UNWIND=none\n${_anchor}")
   string(FIND "${_contents}" "${_anchor}" _position)
